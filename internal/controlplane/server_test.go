@@ -27,6 +27,24 @@ func TestControlPlaneBootstrapStatus(t *testing.T) {
 	}
 }
 
+func TestReadinessTurnsFalseDuringDrain(t *testing.T) {
+	server := NewServer(config.Default())
+	ready := request(t, server.Handler(), http.MethodGet, "/ready", "", nil)
+	if ready.Code != http.StatusOK {
+		t.Fatalf("initial readiness = %d", ready.Code)
+	}
+	server.SetDraining()
+	ready = request(t, server.Handler(), http.MethodGet, "/ready", "", nil)
+	if ready.Code != http.StatusServiceUnavailable {
+		t.Fatalf("draining readiness = %d, want %d", ready.Code, http.StatusServiceUnavailable)
+	}
+	var body map[string]string
+	decode(t, ready, &body)
+	if body["status"] != "draining" {
+		t.Fatalf("draining body = %#v", body)
+	}
+}
+
 func TestValidateDoesNotActivateConfiguration(t *testing.T) {
 	server := NewServer(config.Default())
 	candidate := config.Default()

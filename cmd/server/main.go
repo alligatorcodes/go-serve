@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/alligatorcodes/go-serve/internal/auth"
 	"github.com/alligatorcodes/go-serve/internal/cluster"
@@ -63,7 +64,8 @@ func main() {
 		}
 	}
 
-	controlHandler := controlplane.NewServer(cfg, runtimeManager.Activate).Handler()
+	controlPlane := controlplane.NewServer(cfg, runtimeManager.Activate)
+	controlHandler := controlPlane.Handler()
 	if clusterNode != nil {
 		controlHandler = clusterNode.Handler(controlHandler)
 	}
@@ -123,6 +125,8 @@ func main() {
 	go func() { serverErrors <- publicServer.Serve(publicListener) }()
 	go func() {
 		<-shutdownContext.Done()
+		controlPlane.SetDraining()
+		time.Sleep(250 * time.Millisecond)
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
 		if err := controlServer.Shutdown(shutdown); err != nil {

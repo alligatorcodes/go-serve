@@ -11,7 +11,7 @@
 
 Scrape `GET /metrics` from the control-plane listener after authenticating. The initial metrics include total requests, responses, server errors, and active requests. Request logs include method, path, status, duration, and the supplied request ID; credentials, cookies, and authorization headers are not logged.
 
-Use `/health` for process liveness and `/ready` for traffic readiness. A deployment must remove the instance from service before sending `SIGTERM` and allow `server.shutdown_timeout` for draining.
+Use `/health` for process liveness and `/ready` for traffic readiness. On shutdown, the server marks `/ready` as `503` with `{"status":"draining"}`, waits briefly for load balancers to observe it, then stops accepting connections and drains for up to `server.shutdown_timeout`.
 
 ## Security checklist
 

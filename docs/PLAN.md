@@ -208,7 +208,7 @@ Deliver these in stages:
 - On `SIGTERM` or `SIGINT`, mark readiness false first, wait for load balancers to observe the state, stop accepting new work, drain active requests, and exit after a bounded deadline.
 - Decide and document whether an unavailable identity provider affects only new logins or also token refreshes and existing sessions.
 - Treat invalid TLS or authentication configuration as an activation failure, not as a partial update.
-- Define readiness as valid active configuration, available required dependencies, not draining, and, when clustering is enabled, a healthy quorum/leadership state. Liveness should only represent process health.
+- Define readiness as valid active configuration, available required dependencies, not draining, and, when clustering is enabled, a healthy quorum/leadership state. Liveness should only represent process health. Return `503` with a machine-readable reason when readiness is false.
 - Support health, readiness, and liveness separately.
 - Restrict pprof and debugging endpoints to the admin interface.
 Provide:

@@ -15,13 +15,14 @@ import (
 )
 
 type Server struct {
-	mu       sync.RWMutex
-	config   *config.Snapshot
-	previous *config.Snapshot
-	version  int64
-	state    string
-	lastErr  string
-	activate func(config.Config) error
+	mu         sync.RWMutex
+	config     *config.Snapshot
+	previous   *config.Snapshot
+	version    int64
+	state      string
+	lastErr    string
+	activate   func(config.Config) error
+	readyState bool
 }
 
 func NewServer(cfg config.Config, activators ...func(config.Config) error) *Server {
@@ -29,7 +30,14 @@ func NewServer(cfg config.Config, activators ...func(config.Config) error) *Serv
 	if len(activators) > 0 {
 		activate = activators[0]
 	}
-	return &Server{config: config.NewSnapshot(cfg), state: "bootstrap", activate: activate}
+	return &Server{config: config.NewSnapshot(cfg), state: "bootstrap", activate: activate, readyState: true}
+}
+
+func (s *Server) SetDraining() {
+	s.mu.Lock()
+	s.readyState = false
+	s.state = "draining"
+	s.mu.Unlock()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -58,6 +66,14 @@ func (s *Server) health(response http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	ready := s.readyState
+	state := s.state
+	s.mu.RUnlock()
+	if !ready {
+		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"status": state})
+		return
+	}
 	writeJSON(response, http.StatusOK, map[string]string{"status": "ready"})
 }
 
