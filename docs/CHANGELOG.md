@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added optional TLS termination with TLS 1.2 minimums and certificate/key reloads for new handshakes.
+- Added active upstream health checks with healthy-endpoint selection and clean health-worker shutdown.
+- Added systemd and Kubernetes deployment examples with non-root execution, probes, resource hardening, and graceful termination settings.
+- Added TLS configuration and health failover tests.
 - Protected the control-plane API, OpenAPI document, and documentation UI with the configured authentication middleware while leaving OAuth login/callback/logout endpoints reachable.
 - Upgraded the local documentation page to render the served OpenAPI document without external runtime CDN dependencies.
 - Implemented OAuth2/OIDC authentication offload with provider discovery, JWKS-backed token validation, authorization-code flow with PKCE, encrypted secure session cookies, login/callback/logout endpoints, bearer-token mode, scope authorization, and safe return-path handling.

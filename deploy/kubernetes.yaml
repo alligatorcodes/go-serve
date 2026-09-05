@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-serve
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-serve
+  template:
+    metadata:
+      labels:
+        app: go-serve
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: go-serve
+          image: ghcr.io/example/go-serve:latest
+          args: ["-config", "/etc/go-serve/config.toml"]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 9901
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/go-serve
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: go-serve-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-serve
+spec:
+  selector:
+    app: go-serve
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

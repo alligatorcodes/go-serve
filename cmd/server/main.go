@@ -83,6 +83,15 @@ func main() {
 		slog.Error("failed to listen for data plane", "addr", publicServer.Addr, "error", err)
 		os.Exit(1)
 	}
+	if cfg.Server.TLSCertFile != "" {
+		publicListener, err = dataplane.TLSListener(publicListener, cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile)
+		if err != nil {
+			_ = controlListener.Close()
+			_ = publicListener.Close()
+			slog.Error("failed to configure data-plane TLS", "error", err)
+			os.Exit(1)
+		}
+	}
 	publicListener = dataplane.LimitListener(publicListener, cfg.Limits.MaxConnections)
 
 	shutdownContext, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -101,6 +110,7 @@ func main() {
 		if err := publicServer.Shutdown(shutdown); err != nil {
 			slog.Error("data-plane shutdown failed", "error", err)
 		}
+		dataPlane.Close()
 	}()
 
 	slog.Info("starting control plane", "addr", controlServer.Addr, "ui", cfg.ControlPlane.UI)

@@ -1,6 +1,7 @@
 package dataplane
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -116,6 +117,39 @@ func TestUpstreamRequestTimeout(t *testing.T) {
 	response := serve(server, http.MethodGet, "slow.example.com", "/", "")
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("timeout status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+}
+
+func TestHealthChecksSelectOnlyHealthyEndpoints(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/health" {
+			response.WriteHeader(http.StatusNoContent)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+	unhealthy := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer unhealthy.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{unhealthy.URL, healthy.URL}, HealthPath: "/health"}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	pool := server.routes[0].upstream
+	pool.checkHealth(context.Background())
+	if pool.healthy[0].Load() || !pool.healthy[1].Load() {
+		t.Fatalf("health states = [%v, %v]", pool.healthy[0].Load(), pool.healthy[1].Load())
+	}
+	response := serve(server, http.MethodGet, "api.example.com", "/", "")
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("healthy failover status = %d", response.Code)
 	}
 }
 

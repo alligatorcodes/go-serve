@@ -37,5 +37,7 @@ A failed parse, validation, or compile step must leave the active configuration 
 - OIDC also requires `session_secret_file`, containing at least 32 bytes used to encrypt session cookies. Bearer mode requires `issuer_url` and `client_id` but does not create browser sessions.
 - Route identity headers must be stripped from incoming requests before trusted values are added.
 - Durations use Go duration syntax such as `5s`, `30s`, and `1m`.
+- Configure both `server.tls_cert_file` and `server.tls_key_file` to enable TLS termination. Certificates are reloaded for new handshakes when either file changes.
+- `upstreams.health_path` enables active health checks; unhealthy endpoints are removed from selection until a later check succeeds.
 - Configuration responses are redacted and never include client secrets, tokens, session material, or private keys.
 - `PUT /api/v1/config` requires the current `ETag` through `If-Match` to prevent lost updates.

@@ -20,6 +20,7 @@ type Server struct {
 	maxInFlight chan struct{}
 	maxBody     int64
 	authorizer  Authorizer
+	stop        context.CancelFunc
 }
 
 type Authorizer interface {
@@ -39,8 +40,11 @@ type upstreamPool struct {
 	endpoints      []*url.URL
 	next           atomic.Uint64
 	requestTimeout time.Duration
+	healthPath     string
+	healthInterval time.Duration
 	transport      *http.Transport
 	proxy          *httputil.ReverseProxy
+	healthy        []atomic.Bool
 }
 
 func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
@@ -71,9 +75,20 @@ func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 		if requestTimeout <= 0 {
 			requestTimeout = 30 * time.Second
 		}
+		healthInterval := upstream.HealthInterval
+		if healthInterval <= 0 {
+			healthInterval = 10 * time.Second
+		}
+		healthy := make([]atomic.Bool, len(endpoints))
+		for index := range healthy {
+			healthy[index].Store(true)
+		}
 		pool := &upstreamPool{
 			endpoints:      endpoints,
 			requestTimeout: requestTimeout,
+			healthPath:     upstream.HealthPath,
+			healthInterval: healthInterval,
+			healthy:        healthy,
 			transport: &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
 				DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
@@ -113,12 +128,26 @@ func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 		})
 	}
 
-	return &Server{
+	serverContext, stop := context.WithCancel(context.Background())
+	server := &Server{
 		routes:      routes,
 		maxInFlight: make(chan struct{}, cfg.Limits.MaxInFlight),
 		maxBody:     cfg.Limits.MaxBodyBytes,
 		authorizer:  firstAuthorizer(authorizers),
-	}, nil
+		stop:        stop,
+	}
+	for _, upstream := range upstreams {
+		if upstream.healthPath != "" {
+			go upstream.healthLoop(serverContext)
+		}
+	}
+	return server, nil
+}
+
+func (s *Server) Close() {
+	if s.stop != nil {
+		s.stop()
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -148,6 +177,10 @@ func (s *Server) Handler() http.Handler {
 				}
 				return
 			}
+		}
+		if !route.upstream.hasHealthyEndpoint() {
+			http.Error(response, "upstream unavailable", http.StatusServiceUnavailable)
+			return
 		}
 		ctx, cancel := context.WithTimeout(request.Context(), route.upstream.requestTimeout)
 		defer cancel()
@@ -190,7 +223,7 @@ func (s *Server) match(request *http.Request) (*compiledRoute, bool) {
 func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
-			target := u.endpoints[u.next.Add(1)%uint64(len(u.endpoints))]
+			target := u.pick()
 			request.URL.Scheme = target.Scheme
 			request.URL.Host = target.Host
 			request.Host = target.Host
@@ -202,6 +235,61 @@ func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 			http.Error(response, "upstream unavailable", http.StatusBadGateway)
 		},
 		FlushInterval: 100 * time.Millisecond,
+	}
+}
+
+func (u *upstreamPool) pick() *url.URL {
+	for index := uint64(0); index < uint64(len(u.endpoints)); index++ {
+		candidate := (u.next.Add(1) + index) % uint64(len(u.endpoints))
+		if u.healthy[candidate].Load() {
+			return u.endpoints[candidate]
+		}
+	}
+	return nil
+}
+
+func (u *upstreamPool) hasHealthyEndpoint() bool {
+	for index := range u.healthy {
+		if u.healthy[index].Load() {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *upstreamPool) healthLoop(ctx context.Context) {
+	u.checkHealth(ctx)
+	ticker := time.NewTicker(u.healthInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			u.checkHealth(ctx)
+		}
+	}
+}
+
+func (u *upstreamPool) checkHealth(parent context.Context) {
+	client := &http.Client{Transport: u.transport, Timeout: u.requestTimeout}
+	for index, endpoint := range u.endpoints {
+		requestContext, cancel := context.WithTimeout(parent, u.requestTimeout)
+		target := *endpoint
+		target.Path = joinURLPath(target.Path, u.healthPath)
+		request, err := http.NewRequestWithContext(requestContext, http.MethodGet, target.String(), nil)
+		if err == nil {
+			response, requestErr := client.Do(request)
+			if requestErr == nil {
+				u.healthy[index].Store(response.StatusCode >= 200 && response.StatusCode < 400)
+				response.Body.Close()
+			} else {
+				u.healthy[index].Store(false)
+			}
+		} else {
+			u.healthy[index].Store(false)
+		}
+		cancel()
 	}
 }
 

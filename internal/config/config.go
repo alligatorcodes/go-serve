@@ -26,6 +26,8 @@ type ServerConfig struct {
 	WriteTimeout      time.Duration `toml:"write_timeout" json:"write_timeout"`
 	IdleTimeout       time.Duration `toml:"idle_timeout" json:"idle_timeout"`
 	ShutdownTimeout   time.Duration `toml:"shutdown_timeout" json:"shutdown_timeout"`
+	TLSCertFile       string        `toml:"tls_cert_file" json:"-"`
+	TLSKeyFile        string        `toml:"tls_key_file" json:"-"`
 }
 
 type ControlPlaneConfig struct {
@@ -68,6 +70,7 @@ type UpstreamConfig struct {
 	HealthPath     string        `toml:"health_path" json:"health_path"`
 	DialTimeout    time.Duration `toml:"dial_timeout" json:"dial_timeout"`
 	RequestTimeout time.Duration `toml:"request_timeout" json:"request_timeout"`
+	HealthInterval time.Duration `toml:"health_interval" json:"health_interval"`
 }
 
 // Snapshot is an immutable copy of a validated configuration. Config returns
@@ -162,6 +165,9 @@ func Default() Config {
 func (c Config) Validate() error {
 	if c.Server.PublicAddr == "" || c.Server.AdminAddr == "" {
 		return fmt.Errorf("server public_addr and admin_addr are required")
+	}
+	if (c.Server.TLSCertFile == "") != (c.Server.TLSKeyFile == "") {
+		return fmt.Errorf("tls_cert_file and tls_key_file must be configured together")
 	}
 	if c.ControlPlane.OpenAPIPath == "" || c.ControlPlane.OpenAPIPath[0] != '/' {
 		return fmt.Errorf("control_plane.openapi_path must be an absolute URL path")

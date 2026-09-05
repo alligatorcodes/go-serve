@@ -73,3 +73,11 @@ func TestSnapshotDoesNotShareMutableConfiguration(t *testing.T) {
 		t.Fatalf("snapshot was mutated through a caller-owned value: %#v", stored.Routes[0])
 	}
 }
+
+func TestTLSFilesMustBeConfiguredTogether(t *testing.T) {
+	value := Default()
+	value.Server.TLSCertFile = "/etc/go-serve/tls.crt"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "configured together") {
+		t.Fatalf("error = %v, want paired TLS-file error", err)
+	}
+}

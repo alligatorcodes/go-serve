@@ -1,0 +1,21 @@
+[Unit]
+Description=go-serve HTTP gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=go-serve
+Group=go-serve
+ExecStart=/usr/local/bin/go-serve -config /etc/go-serve/config.toml
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/go-serve
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
