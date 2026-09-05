@@ -178,7 +178,7 @@ Use Go's `net/http` server as the baseline. It handles each accepted connection/
 - Keep blocking I/O in request-scoped goroutines and ensure every goroutine has a cancellation path.
 - Use connection pooling and bounded idle connections for upstreams.
 - Use a dedicated health-check transport that bypasses request retries and circuit breakers. Health checks must be able to detect recovery after the request circuit opens.
-- Track health and circuit state per endpoint unless the documented policy intentionally takes the entire upstream pool offline. Prefer endpoint-level failure counters and a single half-open probe after cooldown.
+- Track health and circuit state per endpoint unless the documented policy intentionally takes the entire upstream pool offline. Prefer endpoint-level failure counters and a single guarded half-open probe after cooldown. This isolation is now the required implementation boundary.
 - Add bounded exponential retry backoff with jitter and stop retrying when the request context deadline is nearly exhausted.
 - Ensure shared configuration, metrics, sessions, and caches are race-free. Prefer immutable snapshots and synchronization at ownership boundaries.
 - Run the race detector and load tests before release.

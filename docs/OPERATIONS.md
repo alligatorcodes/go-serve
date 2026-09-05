@@ -24,6 +24,7 @@ Use `/health` for process liveness and `/ready` for traffic readiness. A deploym
 - Treat virtual-IP ownership as a host integration: use audited, idempotent leader/follower hooks or keepalived rather than granting the gateway broad network privileges.
 - Monitor leader changes, quorum loss, assignment expiry, forwarding failures, and VIP hook failures.
 - Review route `require_auth`, `scopes`, body limits, upstream timeouts, retries, and circuit-breaker thresholds before production.
+- Circuit breakers are endpoint-specific; a failed backend should not take healthy peers offline. Health checks use an independent transport and can restore an endpoint after request failures.
 - Do not log tokens, cookies, authorization codes, or secret file contents.
 
 ## Release checks

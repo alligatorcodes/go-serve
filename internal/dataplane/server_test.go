@@ -125,7 +125,7 @@ func TestRetryTransportRetriesOnlySafeMethods(t *testing.T) {
 	calls := 0
 	transport := &retryTransport{
 		attempts: 1,
-		breaker:  &circuitBreaker{threshold: 5, cooldown: time.Minute},
+		breakers: []*circuitBreaker{{threshold: 5, cooldown: time.Minute}},
 		base: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 			calls++
 			if calls == 1 {
@@ -134,14 +134,14 @@ func TestRetryTransportRetriesOnlySafeMethods(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
 		}),
 	}
-	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil).WithContext(context.WithValue(context.Background(), endpointIndexKey{}, 0))
 	response, err := transport.RoundTrip(request)
 	if err != nil || response.StatusCode != http.StatusNoContent || calls != 2 {
 		t.Fatalf("GET retry result = response=%v err=%v calls=%d", response, err, calls)
 	}
 
 	calls = 0
-	request = httptest.NewRequest(http.MethodPost, "http://upstream.test", strings.NewReader("body"))
+	request = httptest.NewRequest(http.MethodPost, "http://upstream.test", strings.NewReader("body")).WithContext(context.WithValue(context.Background(), endpointIndexKey{}, 0))
 	response, err = transport.RoundTrip(request)
 	if err != nil || response.StatusCode != http.StatusBadGateway || calls != 1 {
 		t.Fatalf("POST retry result = response=%v err=%v calls=%d", response, err, calls)
@@ -151,18 +151,55 @@ func TestRetryTransportRetriesOnlySafeMethods(t *testing.T) {
 func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
 	calls := 0
 	transport := &retryTransport{
-		breaker: &circuitBreaker{threshold: 2, cooldown: time.Hour},
+		breakers: []*circuitBreaker{{threshold: 2, cooldown: time.Hour}},
 		base: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 			calls++
 			return nil, errors.New("connection failed")
 		}),
 	}
-	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil).WithContext(context.WithValue(context.Background(), endpointIndexKey{}, 0))
 	_, _ = transport.RoundTrip(request)
 	_, _ = transport.RoundTrip(request)
 	_, err := transport.RoundTrip(request)
 	if err == nil || calls != 2 {
 		t.Fatalf("circuit result = err=%v calls=%d", err, calls)
+	}
+}
+
+func TestEndpointBreakersAreIndependent(t *testing.T) {
+	breakers := []*circuitBreaker{
+		{threshold: 1, cooldown: time.Hour},
+		{threshold: 1, cooldown: time.Hour},
+	}
+	transport := &retryTransport{
+		breakers: breakers,
+		base: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Context().Value(endpointIndexKey{}) == 0 {
+				return nil, errors.New("endpoint one failed")
+			}
+			return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}),
+	}
+	first := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil).WithContext(context.WithValue(context.Background(), endpointIndexKey{}, 0))
+	if _, err := transport.RoundTrip(first); err == nil {
+		t.Fatal("failed endpoint unexpectedly succeeded")
+	}
+	second := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil).WithContext(context.WithValue(context.Background(), endpointIndexKey{}, 1))
+	if response, err := transport.RoundTrip(second); err != nil || response.StatusCode != http.StatusNoContent {
+		t.Fatalf("healthy endpoint was blocked: response=%v err=%v", response, err)
+	}
+}
+
+func TestCircuitBreakerAllowsOnlyOneHalfOpenProbe(t *testing.T) {
+	breaker := &circuitBreaker{threshold: 1, cooldown: time.Millisecond}
+	breaker.failure()
+	time.Sleep(2 * time.Millisecond)
+	if !breaker.allow() || breaker.allow() {
+		t.Fatal("breaker allowed more than one half-open probe")
+	}
+	breaker.success()
+	if !breaker.allow() {
+		t.Fatal("successful probe did not close breaker")
 	}
 }
 

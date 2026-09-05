@@ -45,16 +45,17 @@ type compiledRoute struct {
 }
 
 type upstreamPool struct {
-	endpoints      []*url.URL
-	next           atomic.Uint64
-	requestTimeout time.Duration
-	healthPath     string
-	healthInterval time.Duration
-	retryAttempts  int
-	transport      http.RoundTripper
-	proxy          *httputil.ReverseProxy
-	healthy        []atomic.Bool
-	breaker        *circuitBreaker
+	endpoints       []*url.URL
+	next            atomic.Uint64
+	requestTimeout  time.Duration
+	healthPath      string
+	healthInterval  time.Duration
+	retryAttempts   int
+	transport       http.RoundTripper
+	healthTransport *http.Transport
+	proxy           *httputil.ReverseProxy
+	healthy         []atomic.Bool
+	breakers        []*circuitBreaker
 }
 
 func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
@@ -118,29 +119,33 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			cooldown = 10 * time.Second
 		}
 		healthy := make([]atomic.Bool, len(endpoints))
+		breakers := make([]*circuitBreaker, len(endpoints))
 		for index := range healthy {
 			healthy[index].Store(true)
+			breakers[index] = &circuitBreaker{threshold: threshold, cooldown: cooldown}
+		}
+		rawTransport := &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   32,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
 		}
 		pool := &upstreamPool{
-			endpoints:      endpoints,
-			requestTimeout: requestTimeout,
-			healthPath:     upstream.HealthPath,
-			healthInterval: healthInterval,
-			retryAttempts:  retryAttempts,
-			healthy:        healthy,
-			transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
-				ForceAttemptHTTP2:     true,
-				MaxIdleConns:          256,
-				MaxIdleConnsPerHost:   32,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			},
-			breaker: &circuitBreaker{threshold: threshold, cooldown: cooldown},
+			endpoints:       endpoints,
+			requestTimeout:  requestTimeout,
+			healthPath:      upstream.HealthPath,
+			healthInterval:  healthInterval,
+			retryAttempts:   retryAttempts,
+			healthy:         healthy,
+			breakers:        breakers,
+			healthTransport: rawTransport,
+			transport:       rawTransport,
 		}
-		pool.transport = &retryTransport{base: pool.transport, attempts: retryAttempts, breaker: pool.breaker}
+		pool.transport = &retryTransport{base: rawTransport, attempts: retryAttempts, breakers: breakers}
 		pool.proxy = newProxy(pool)
 		upstreams[upstream.Name] = pool
 	}
@@ -282,12 +287,13 @@ func match(routes []compiledRoute, request *http.Request) (*compiledRoute, bool)
 func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
-			target := u.pick()
+			target, index := u.pick()
 			request.URL.Scheme = target.Scheme
 			request.URL.Host = target.Host
 			request.Host = target.Host
 			request.URL.Path = joinURLPath(target.Path, request.URL.Path)
 			request.URL.RawPath = ""
+			*request = *request.WithContext(context.WithValue(request.Context(), endpointIndexKey{}, index))
 		},
 		Transport: u.transport,
 		ErrorHandler: func(response http.ResponseWriter, _ *http.Request, err error) {
@@ -297,34 +303,37 @@ func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	}
 }
 
-func (u *upstreamPool) pick() *url.URL {
+func (u *upstreamPool) pick() (*url.URL, int) {
 	for index := uint64(0); index < uint64(len(u.endpoints)); index++ {
 		candidate := (u.next.Add(1) + index) % uint64(len(u.endpoints))
-		if u.healthy[candidate].Load() {
-			return u.endpoints[candidate]
+		if u.healthy[candidate].Load() && u.breakers[candidate].allow() {
+			return u.endpoints[candidate], int(candidate)
 		}
 	}
-	return u.endpoints[0]
+	return u.endpoints[0], 0
 }
 
 type retryTransport struct {
 	base     http.RoundTripper
 	attempts int
-	breaker  *circuitBreaker
+	breakers []*circuitBreaker
 }
 
+type endpointIndexKey struct{}
+
 func (transport *retryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if !transport.breaker.allow() {
+	index, ok := request.Context().Value(endpointIndexKey{}).(int)
+	if !ok || index < 0 || index >= len(transport.breakers) || !transport.breakers[index].allow() {
 		return nil, errors.New("upstream circuit is open")
 	}
 	safe := request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.Method == http.MethodPut || request.Method == http.MethodDelete
 	for attempt := 0; ; attempt++ {
 		response, err := transport.base.RoundTrip(request)
 		if err == nil && response != nil && response.StatusCode < http.StatusInternalServerError {
-			transport.breaker.success()
+			transport.breakers[index].success()
 			return response, nil
 		}
-		transport.breaker.failure()
+		transport.breakers[index].failure()
 		if attempt >= transport.attempts || !safe {
 			return response, err
 		}
@@ -350,18 +359,27 @@ type circuitBreaker struct {
 	cooldown  time.Duration
 	failures  int
 	openUntil time.Time
+	halfOpen  bool
 }
 
 func (breaker *circuitBreaker) allow() bool {
 	breaker.mu.Lock()
 	defer breaker.mu.Unlock()
-	return breaker.openUntil.IsZero() || time.Now().After(breaker.openUntil)
+	if breaker.openUntil.IsZero() {
+		return true
+	}
+	if time.Now().Before(breaker.openUntil) || breaker.halfOpen {
+		return false
+	}
+	breaker.halfOpen = true
+	return true
 }
 
 func (breaker *circuitBreaker) success() {
 	breaker.mu.Lock()
 	breaker.failures = 0
 	breaker.openUntil = time.Time{}
+	breaker.halfOpen = false
 	breaker.mu.Unlock()
 }
 
@@ -371,6 +389,7 @@ func (breaker *circuitBreaker) failure() {
 	breaker.failures++
 	if breaker.failures >= breaker.threshold {
 		breaker.openUntil = time.Now().Add(breaker.cooldown)
+		breaker.halfOpen = false
 	}
 }
 
@@ -398,7 +417,7 @@ func (u *upstreamPool) healthLoop(ctx context.Context) {
 }
 
 func (u *upstreamPool) checkHealth(parent context.Context) {
-	client := &http.Client{Transport: u.transport, Timeout: u.requestTimeout}
+	client := &http.Client{Transport: u.healthTransport, Timeout: u.requestTimeout}
 	for index, endpoint := range u.endpoints {
 		requestContext, cancel := context.WithTimeout(parent, u.requestTimeout)
 		target := *endpoint
