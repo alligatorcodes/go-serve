@@ -35,6 +35,10 @@ Metrics/traces/logs are emitted by both planes, with admin endpoints kept off th
 
 Keep the control plane and data plane as separate packages and preferably separate listeners. The control plane owns desired configuration, validation, compilation, status, and rollback. The data plane consumes immutable, already-validated runtime snapshots and must not observe partially applied state.
 
+### Runtime manager
+
+Use one runtime manager as the activation boundary for both planes. A runtime snapshot should contain the validated configuration plus compiled data-plane routes, upstream pools, TLS state, and authentication policy. A successful control-plane write must parse and validate the candidate, compile a complete replacement runtime, atomically swap it, then publish the new control-plane version. If compilation fails, neither live traffic nor the published version changes. Retain the previous runtime for rollback; do not let the control plane and data plane own independent configuration snapshots.
+
 Suggested repository layout:
 
 ```text
@@ -88,6 +92,10 @@ Requirements:
 - Activate only a fully validated snapshot using an atomic swap.
 - Retain the last-known-good snapshot and support explicit rollback.
 - Associate every active snapshot with a monotonically increasing version and audit event.
+- Treat listener addresses, TLS files, authentication identity-provider settings, and cluster membership as restart-only until coordinated multi-listener reconfiguration is implemented.
+- Either implement `route.headers` with explicit request-header set/remove semantics, or remove it from the public schema until implemented. Do not expose configuration fields that silently do nothing.
+
+The published module path must match the repository. Before release, replace placeholder import paths such as `github.com/example/go-serve` with the canonical repository module path and verify all internal imports and deployment examples.
 
 ## OAuth2/OIDC Authentication Offload
 
@@ -108,7 +116,7 @@ For non-browser clients, support bearer-token validation as a separate configure
 ### Security requirements
 
 - Use an OIDC discovery document and JWKS endpoint with controlled refresh and key rotation handling.
-- Validate issuer, audience, signature, nonce, state, token expiry, and allowed claims.
+- Validate issuer, audience, signature, nonce, state, token expiry, PKCE, and allowed claims. Generate a distinct nonce for every authorization request, bind it to server-side login state, and reject callbacks whose ID-token nonce does not match.
 - Require TLS for redirect and public endpoints outside explicitly documented development mode.
 - Protect cookies with `Secure`, `HttpOnly`, and an appropriate `SameSite` policy.
 - Encrypt or authenticate server-side session data; use a shared session store when multiple instances are deployed.
@@ -118,6 +126,7 @@ For non-browser clients, support bearer-token validation as a separate configure
 - Fail closed when token validation or key refresh cannot establish trust.
 - Add route-level authorization rules for scopes, roles, or claims after authentication.
 - Make upstream identity headers impossible for clients to spoof: strip incoming copies before adding trusted values.
+- Test WebSocket upgrades, streaming responses, and any `http.ResponseWriter` interfaces used by the proxy. If WebSockets are out of scope, reject and document them explicitly.
 
 Authentication should be a middleware in the request pipeline, not a special case embedded in routing or proxy code. This permits public routes, protected routes, and different policies per virtual host.
 
@@ -153,6 +162,10 @@ The `ui` flag controls presentation only. It must not disable API authentication
 
 For configuration writes, use optimistic concurrency with a version field or ETag. Return structured errors, record the actor and request ID, and make validation available without activation. A failed update must leave the active data plane unchanged.
 
+### Route-header contract
+
+Define route header behavior before implementation. Separate request headers sent upstream from response headers sent to clients, distinguish set/add/remove operations, and maintain an explicit denylist for client-spoofable trusted headers. Add compatibility tests for case-insensitive names and repeated headers.
+
 ## Concurrent Client Connections
 
 Use Go's `net/http` server as the baseline. It handles each accepted connection/request concurrently, but production behavior must be made explicit:
@@ -164,6 +177,9 @@ Use Go's `net/http` server as the baseline. It handles each accepted connection/
 - Use bounded worker or semaphore controls only where downstream work needs explicit admission control; do not add an unbounded goroutine per internal task.
 - Keep blocking I/O in request-scoped goroutines and ensure every goroutine has a cancellation path.
 - Use connection pooling and bounded idle connections for upstreams.
+- Use a dedicated health-check transport that bypasses request retries and circuit breakers. Health checks must be able to detect recovery after the request circuit opens.
+- Track health and circuit state per endpoint unless the documented policy intentionally takes the entire upstream pool offline. Prefer endpoint-level failure counters and a single half-open probe after cooldown.
+- Add bounded exponential retry backoff with jitter and stop retrying when the request context deadline is nearly exhausted.
 - Ensure shared configuration, metrics, sessions, and caches are race-free. Prefer immutable snapshots and synchronization at ownership boundaries.
 - Run the race detector and load tests before release.
 
@@ -189,20 +205,16 @@ Deliver these in stages:
 
 ## Lifecycle and Failure Behavior
 
-- On `SIGTERM` or `SIGINT`, mark readiness false, stop accepting new work, drain active requests, and exit after a bounded deadline.
-- Keep the control plane available long enough to report shutdown status, but do not let it extend the deadline.
-- Apply configuration updates atomically; preserve the previous snapshot if compilation or activation fails.
+- On `SIGTERM` or `SIGINT`, mark readiness false first, wait for load balancers to observe the state, stop accepting new work, drain active requests, and exit after a bounded deadline.
 - Decide and document whether an unavailable identity provider affects only new logins or also token refreshes and existing sessions.
 - Treat invalid TLS or authentication configuration as an activation failure, not as a partial update.
+- Define readiness as valid active configuration, available required dependencies, not draining, and, when clustering is enabled, a healthy quorum/leadership state. Liveness should only represent process health.
 - Support health, readiness, and liveness separately.
 - Restrict pprof and debugging endpoints to the admin interface.
-
-## Observability
-
 Provide:
 
-- Structured JSON logs with request ID, trace ID, route, upstream, status, duration, and configuration version.
-- Prometheus metrics for request totals, latency, status codes, active connections, rejected requests, auth outcomes, upstream failures, retries, circuit state, config activations, and reload failures.
+- Structured JSON logs with request ID, trace ID, route, upstream, status, duration, configuration version, and leader/node identity where clustering is enabled.
+- Prometheus metrics with bounded dimensions for route, upstream, status, and method: request totals, latency, status codes, active connections, rejected requests, auth outcomes, upstream failures, retries, circuit opens/half-open probes, health-check failures, configuration activations, and reload failures.
 - OpenTelemetry traces with sensitive headers, tokens, and claims removed.
 - Audit events for control-plane reads and writes, login/logout events, configuration changes, rollbacks, and authorization failures.
 - Redacted startup and configuration status diagnostics.
@@ -246,13 +258,27 @@ A release is ready only when:
 - Shutdown drains within the documented deadline.
 - Metrics, logs, health endpoints, and audit records are usable in a deployment environment.
 
+## Feedback-Driven Improvement Priorities
+
+Before adding more gateway features, close these review findings in order:
+
+1. **Runtime activation contract:** keep configuration, compiled data plane, authentication, TLS, and cluster state behind one atomic runtime manager. The current control-plane-to-data-plane activation path must remain covered by live routing and failed-activation tests.
+2. **Repository identity:** change the placeholder Go module path and all imports to the canonical repository path before publishing releases.
+3. **OIDC correctness:** add nonce generation, state binding, and callback nonce validation; require secure redirect URLs outside an explicit development mode.
+4. **Upstream isolation:** use a health-check transport independent of request retries/circuit breakers, then move breaker state to individual endpoints with guarded half-open recovery.
+5. **Proxy correctness:** define route-header semantics and test URL paths without filesystem normalization. Preserve escaped paths, repeated slashes, trailing slashes, `RawPath`, and encoded separators; add streaming, WebSocket, and `ResponseWriter` interface coverage or document unsupported protocols.
+6. **Lifecycle truthfulness:** make readiness reflect activation, dependencies, draining, and cluster health. Flip readiness before shutdown and allow load balancers to observe the change.
+7. **Operational signal:** add bounded route/upstream/method/status dimensions and counters for retries, auth failures, health failures, circuit transitions, configuration activation, and request rejection. Include route, upstream, config version, and node identity in logs.
+
+Each item requires focused tests, documentation updates, and a changelog entry before it is considered complete.
+
 ## Implementation Sequence
 
-1. Initialize the Go module, CI, linting, structured logging, and baseline server lifecycle.
-2. Add typed configuration, validation, immutable runtime snapshots, and graceful shutdown.
-3. Implement concurrent HTTP handling, routing, reverse proxying, limits, and upstream timeouts.
-4. Add the control-plane API with versioning, optimistic concurrency, atomic activation, and rollback.
-5. Add OAuth2/OIDC middleware, sessions, bearer validation, claim-based authorization, and secret handling.
-6. Add OpenAPI generation and conditionally served, protected Swagger UI controlled by `ui = true`.
-7. Add TLS rotation, health checks, load balancing, retries, circuit breaking, and deployment manifests.
-8. Add observability, security testing, race/fuzz/load testing, operational documentation, and release gates.
+1. Establish the canonical module path, CI, linting, structured logging, and baseline server lifecycle.
+2. Maintain typed configuration, immutable runtime snapshots, atomic data-plane activation, and graceful shutdown.
+3. Harden concurrent HTTP handling, route/header semantics, URL-path preservation, proxy interfaces, limits, and upstream timeouts.
+4. Complete the control-plane API with versioning, optimistic concurrency, activation failure handling, rollback, and audit events.
+5. Harden OAuth2/OIDC with nonce validation, secure redirect enforcement, sessions, bearer validation, claim authorization, and secret handling.
+6. Maintain OpenAPI generation and conditionally served, protected Swagger UI controlled by `ui = true`.
+7. Isolate health-check transport, add endpoint-level health/circuit state, bounded backoff/jitter, TLS rotation, load balancing, and deployment manifests.
+8. Make readiness and shutdown operationally truthful, then expand metrics, security testing, race/fuzz/load testing, documentation, and release gates.
