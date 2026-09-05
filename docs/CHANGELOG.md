@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added OIDC nonce generation, state binding, callback nonce validation, and secure-by-default redirect URL enforcement with explicit insecure-development opt-in.
 - Added an explicit `internal/runtime.Manager` activation boundary shared by the Control Plane and Data Plane, with live reconfiguration and restart-only setting protection.
 - Migrated the Go module and internal imports from the placeholder path to the canonical `github.com/alligatorcodes/go-serve` repository path.
 - Updated `docs/PLAN.md` with feedback-driven priorities covering runtime activation, module identity, OIDC nonce validation, endpoint-level resilience, proxy URL/header correctness, readiness semantics, and richer observability.

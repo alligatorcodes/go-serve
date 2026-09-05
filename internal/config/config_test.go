@@ -89,3 +89,20 @@ func TestClusterConfigurationRequiresConsensusFields(t *testing.T) {
 		t.Fatalf("error = %v, want cluster field validation", err)
 	}
 }
+
+func TestOIDCRejectsInsecureRedirectByDefault(t *testing.T) {
+	value := Default()
+	value.Auth.Mode = "oidc"
+	value.Auth.IssuerURL = "https://issuer.example.com"
+	value.Auth.ClientID = "gateway"
+	value.Auth.RedirectURL = "http://gateway.example.com/oauth2/callback"
+	value.Auth.ClientSecretFile = "/run/secrets/client"
+	value.Auth.SessionSecretFile = "/run/secrets/session"
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "must use HTTPS") {
+		t.Fatalf("error = %v, want secure redirect error", err)
+	}
+	value.Auth.AllowInsecureRedirect = true
+	if err := value.Validate(); err != nil {
+		t.Fatalf("development redirect was rejected: %v", err)
+	}
+}

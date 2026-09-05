@@ -106,7 +106,7 @@ The server should act as an authentication-aware edge component so upstream appl
 1. A request reaches a route with `require_auth = true`.
 2. The auth middleware checks a secure, signed/encrypted session cookie.
 3. If no valid session exists, the server starts Authorization Code flow with PKCE and redirects to the configured identity provider.
-4. The callback exchanges the code, validates the ID token, validates issuer, audience, nonce, state, expiry, and (where applicable) PKCE.
+4. The callback exchanges the code, validates the ID token, validates issuer, audience, nonce bound to the login state, state, expiry, and (where applicable) PKCE.
 5. The server creates a bounded session and redirects to the original safe destination.
 6. The proxy forwards selected identity claims to the upstream using configured headers, or forwards an access token only when explicitly requested.
 7. Logout invalidates the local session and optionally invokes the provider logout endpoint.
@@ -117,7 +117,7 @@ For non-browser clients, support bearer-token validation as a separate configure
 
 - Use an OIDC discovery document and JWKS endpoint with controlled refresh and key rotation handling.
 - Validate issuer, audience, signature, nonce, state, token expiry, PKCE, and allowed claims. Generate a distinct nonce for every authorization request, bind it to server-side login state, and reject callbacks whose ID-token nonce does not match.
-- Require TLS for redirect and public endpoints outside explicitly documented development mode.
+- Require TLS for redirect and public endpoints outside explicitly documented development mode; insecure OIDC redirects require an explicit development-only configuration flag.
 - Protect cookies with `Secure`, `HttpOnly`, and an appropriate `SameSite` policy.
 - Encrypt or authenticate server-side session data; use a shared session store when multiple instances are deployed.
 - Prevent open redirects by allowing only configured post-login destinations.

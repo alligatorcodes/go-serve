@@ -107,3 +107,14 @@ func TestProtectRequiresAuthenticationForAdminRoutes(t *testing.T) {
 		t.Fatalf("protected status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestOIDCNonceMustMatchLoginState(t *testing.T) {
+	if !validNonce("nonce-a", "nonce-a") {
+		t.Fatal("matching nonce was rejected")
+	}
+	for _, pair := range [][2]string{{"", "nonce-a"}, {"nonce-a", ""}, {"nonce-a", "nonce-b"}} {
+		if validNonce(pair[0], pair[1]) {
+			t.Fatalf("invalid nonce pair accepted: %#v", pair)
+		}
+	}
+}

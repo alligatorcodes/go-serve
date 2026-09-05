@@ -28,6 +28,7 @@ type Claims struct {
 	Email   string    `json:"email,omitempty"`
 	Scopes  []string  `json:"scope,omitempty"`
 	Expiry  time.Time `json:"exp"`
+	Nonce   string    `json:"nonce,omitempty"`
 }
 
 type Verifier interface {
@@ -49,6 +50,7 @@ type Middleware struct {
 type state struct {
 	returnPath string
 	verifier   string
+	nonce      string
 	expires    time.Time
 }
 
@@ -89,6 +91,9 @@ func New(ctx context.Context, cfg config.AuthConfig) (*Middleware, error) {
 		parsed, err := url.Parse(cfg.RedirectURL)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			return nil, errors.New("redirect_url must be an absolute URL")
+		}
+		if parsed.Scheme != "https" && !cfg.AllowInsecureRedirect {
+			return nil, errors.New("OIDC redirect_url must use HTTPS unless insecure redirects are explicitly enabled")
 		}
 		middleware.secureCookie = parsed.Scheme == "https"
 	}
@@ -197,14 +202,19 @@ func (m *Middleware) login(response http.ResponseWriter, request *http.Request) 
 		http.Error(response, "unable to create PKCE verifier", http.StatusInternalServerError)
 		return
 	}
+	nonce, err := randomToken(32)
+	if err != nil {
+		http.Error(response, "unable to create OIDC nonce", http.StatusInternalServerError)
+		return
+	}
 	returnPath := request.URL.Query().Get("return")
 	if !safeReturnPath(returnPath) {
 		returnPath = "/"
 	}
 	m.mu.Lock()
-	m.states[stateToken] = state{returnPath: returnPath, verifier: verifier, expires: m.clock().Add(10 * time.Minute)}
+	m.states[stateToken] = state{returnPath: returnPath, verifier: verifier, nonce: nonce, expires: m.clock().Add(10 * time.Minute)}
 	m.mu.Unlock()
-	http.Redirect(response, request, m.oauth.AuthCodeURL(stateToken, oauth2.S256ChallengeOption(verifier)), http.StatusFound)
+	http.Redirect(response, request, m.oauth.AuthCodeURL(stateToken, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("nonce", nonce)), http.StatusFound)
 }
 
 func (m *Middleware) callback(response http.ResponseWriter, request *http.Request) {
@@ -233,7 +243,7 @@ func (m *Middleware) callback(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	claims, err := m.verifier.Verify(request.Context(), rawIDToken)
-	if err != nil || !validClaims(claims, m.clock()) {
+	if err != nil || !validClaims(claims, m.clock()) || !validNonce(claims.Nonce, loginState.nonce) {
 		http.Error(response, "identity token invalid", http.StatusUnauthorized)
 		return
 	}
@@ -310,6 +320,10 @@ func validClaims(claims Claims, now time.Time) bool {
 	return claims.Subject != "" && claims.Expiry.After(now)
 }
 
+func validNonce(actual, expected string) bool {
+	return expected != "" && actual != "" && actual == expected
+}
+
 func hasScopes(granted, required []string) bool {
 	set := make(map[string]struct{}, len(granted))
 	for _, scope := range granted {
@@ -364,9 +378,10 @@ func (v oidcVerifier) Verify(ctx context.Context, raw string) (Claims, error) {
 		Email   string `json:"email"`
 		Scope   string `json:"scope"`
 		Expiry  int64  `json:"exp"`
+		Nonce   string `json:"nonce"`
 	}
 	if err := token.Claims(&value); err != nil {
 		return Claims{}, err
 	}
-	return Claims{Subject: value.Subject, Email: value.Email, Scopes: strings.Fields(value.Scope), Expiry: time.Unix(value.Expiry, 0)}, nil
+	return Claims{Subject: value.Subject, Email: value.Email, Scopes: strings.Fields(value.Scope), Expiry: time.Unix(value.Expiry, 0), Nonce: value.Nonce}, nil
 }

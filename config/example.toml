@@ -44,6 +44,8 @@ client_id = "edge-server"
 client_secret_file = "/run/secrets/oidc-client-secret"
 session_secret_file = "/run/secrets/session-secret"
 redirect_url = "https://gateway.example.com/oauth2/callback"
+# Development-only HTTP redirects require explicit opt-in.
+# allow_insecure_redirect = true
 session_cookie_name = "go_serve_session"
 allowed_scopes = ["openid", "profile", "email"]
 

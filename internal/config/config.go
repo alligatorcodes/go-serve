@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -59,14 +60,15 @@ type ControlPlaneConfig struct {
 }
 
 type AuthConfig struct {
-	Mode              string   `toml:"mode" json:"mode"`
-	IssuerURL         string   `toml:"issuer_url" json:"issuer_url"`
-	ClientID          string   `toml:"client_id" json:"client_id"`
-	ClientSecretFile  string   `toml:"client_secret_file" json:"-"`
-	SessionSecretFile string   `toml:"session_secret_file" json:"-"`
-	RedirectURL       string   `toml:"redirect_url" json:"redirect_url"`
-	SessionCookieName string   `toml:"session_cookie_name" json:"session_cookie_name"`
-	AllowedScopes     []string `toml:"allowed_scopes" json:"allowed_scopes"`
+	Mode                  string   `toml:"mode" json:"mode"`
+	IssuerURL             string   `toml:"issuer_url" json:"issuer_url"`
+	ClientID              string   `toml:"client_id" json:"client_id"`
+	ClientSecretFile      string   `toml:"client_secret_file" json:"-"`
+	SessionSecretFile     string   `toml:"session_secret_file" json:"-"`
+	RedirectURL           string   `toml:"redirect_url" json:"redirect_url"`
+	AllowInsecureRedirect bool     `toml:"allow_insecure_redirect" json:"allow_insecure_redirect"`
+	SessionCookieName     string   `toml:"session_cookie_name" json:"session_cookie_name"`
+	AllowedScopes         []string `toml:"allowed_scopes" json:"allowed_scopes"`
 }
 
 type LimitsConfig struct {
@@ -229,6 +231,15 @@ func (c Config) Validate() error {
 	}
 	if c.Auth.Mode == "oidc" && (c.Auth.RedirectURL == "" || c.Auth.ClientSecretFile == "" || c.Auth.SessionSecretFile == "") {
 		return fmt.Errorf("oidc requires redirect_url, client_secret_file, and session_secret_file")
+	}
+	if c.Auth.Mode == "oidc" && c.Auth.RedirectURL != "" {
+		redirect, err := url.Parse(c.Auth.RedirectURL)
+		if err != nil || redirect.Scheme == "" || redirect.Host == "" {
+			return fmt.Errorf("redirect_url must be an absolute URL")
+		}
+		if redirect.Scheme != "https" && !c.Auth.AllowInsecureRedirect {
+			return fmt.Errorf("oidc redirect_url must use HTTPS unless allow_insecure_redirect is enabled")
+		}
 	}
 	for _, route := range c.Routes {
 		if route.RequireAuth && c.Auth.Mode == "disabled" {
