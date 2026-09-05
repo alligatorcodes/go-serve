@@ -1,0 +1,270 @@
+openapi: 3.0.3
+info:
+  title: Go Serve Control Plane API
+  version: 1.0.0
+  description: Administrative API for configuration, health, and runtime status.
+servers:
+  - url: http://127.0.0.1:9901
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      operationId: readiness
+      security: []
+      responses:
+        '200':
+          description: Server is ready to accept work.
+        '503':
+          description: Server is draining or not ready.
+  /api/v1/config:
+    get:
+      operationId: getConfig
+      responses:
+        '200':
+          description: Current redacted desired configuration.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+    put:
+      operationId: replaceConfig
+      summary: Validate and atomically activate configuration.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Configuration activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigStatus'
+        '409':
+          description: Version conflict.
+        '422':
+          description: Configuration failed validation.
+  /api/v1/config/validate:
+    post:
+      operationId: validateConfig
+      summary: Validate without changing active state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Configuration is valid.
+        '422':
+          description: Configuration is invalid.
+  /api/v1/config/rollback:
+    post:
+      operationId: rollbackConfig
+      summary: Restore the previous known-good configuration.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Previous configuration activated.
+        '409':
+          description: Version conflict.
+        '404':
+          description: No rollback target exists.
+  /api/v1/config/status:
+    get:
+      operationId: getConfigStatus
+      responses:
+        '200':
+          description: Active configuration status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigStatus'
+  /api/v1/servers:
+    get:
+      operationId: listServers
+      responses:
+        '200':
+          description: Runtime server status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServerStatus'
+  /api/v1/routes:
+    get:
+      operationId: listRoutes
+      responses:
+        '200':
+          description: Active route status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RouteStatus'
+  /api/openapi.json:
+    get:
+      operationId: openapiDocument
+      security: []
+      responses:
+        '200':
+          description: OpenAPI document. Access is still restricted to the admin listener.
+  /api/docs:
+    get:
+      operationId: swaggerUi
+      description: Served only when control_plane.ui is true.
+      responses:
+        '200':
+          description: Swagger UI HTML.
+        '404':
+          description: UI is disabled.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+      description: ETag of the configuration version being replaced.
+  headers:
+    ETag:
+      schema:
+        type: string
+      description: Current configuration version.
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    Config:
+      type: object
+      required: [server, control_plane, auth, limits]
+      properties:
+        server:
+          $ref: '#/components/schemas/ServerConfig'
+        control_plane:
+          $ref: '#/components/schemas/ControlPlaneConfig'
+        auth:
+          $ref: '#/components/schemas/AuthConfig'
+        limits:
+          $ref: '#/components/schemas/LimitsConfig'
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteConfig'
+        upstreams:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpstreamConfig'
+    ServerConfig:
+      type: object
+      required: [public_addr, admin_addr]
+      properties:
+        public_addr: {type: string, example: ':8080'}
+        admin_addr: {type: string, example: '127.0.0.1:9901'}
+        read_header_timeout: {type: string, example: 5s}
+        read_timeout: {type: string, example: 30s}
+        write_timeout: {type: string, example: 30s}
+        idle_timeout: {type: string, example: 60s}
+        shutdown_timeout: {type: string, example: 15s}
+    ControlPlaneConfig:
+      type: object
+      properties:
+        ui: {type: boolean, default: false}
+        openapi_path: {type: string, default: /api/openapi.json}
+    AuthConfig:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [disabled, oidc, bearer]}
+        issuer_url: {type: string, format: uri}
+        client_id: {type: string}
+        client_secret_file: {type: string}
+        redirect_url: {type: string, format: uri}
+        session_cookie_name: {type: string}
+        allowed_scopes:
+          type: array
+          items: {type: string}
+    LimitsConfig:
+      type: object
+      properties:
+        max_connections: {type: integer, minimum: 1, default: 10000}
+        max_in_flight: {type: integer, minimum: 1, default: 1000}
+        max_header_bytes: {type: integer, minimum: 1024, default: 1048576}
+        max_body_bytes: {type: integer, minimum: 1, default: 10485760}
+    RouteConfig:
+      type: object
+      required: [name, host, upstream]
+      properties:
+        name: {type: string}
+        host: {type: string}
+        path_prefix: {type: string, default: /}
+        methods: {type: array, items: {type: string}}
+        upstream: {type: string}
+        require_auth: {type: boolean, default: false}
+        scopes: {type: array, items: {type: string}}
+        headers: {type: object, additionalProperties: {type: string}}
+    UpstreamConfig:
+      type: object
+      required: [name, urls]
+      properties:
+        name: {type: string}
+        urls: {type: array, items: {type: string, format: uri}}
+        health_path: {type: string, default: /health}
+        dial_timeout: {type: string, example: 2s}
+        request_timeout: {type: string, example: 30s}
+    ConfigStatus:
+      type: object
+      required: [version, state]
+      properties:
+        version: {type: integer, format: int64}
+        state: {type: string, enum: [bootstrap, active, failed, draining]}
+        ui: {type: boolean}
+        activated_at: {type: string, format: date-time}
+        error: {type: string}
+    ServerStatus:
+      type: object
+      properties:
+        name: {type: string}
+        state: {type: string}
+        active_connections: {type: integer, format: int64}
+        in_flight_requests: {type: integer, format: int64}
+    RouteStatus:
+      type: object
+      properties:
+        name: {type: string}
+        upstream: {type: string}
+        healthy_endpoints: {type: integer}
+        requests_total: {type: integer, format: int64}
