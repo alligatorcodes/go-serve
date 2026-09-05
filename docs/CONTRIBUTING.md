@@ -85,6 +85,17 @@ CGO_ENABLED=1 go test -race ./...
 go run ./cmd/server -config config/example.toml
 ```
 
+Equivalent project workflows are available through the `Makefile`:
+
+```sh
+make test
+make vet
+make race
+make fuzz
+make build
+make docker-build IMAGE=go-serve:dev
+```
+
 The example configuration intentionally uses `auth.mode = "disabled"` and `require_auth = false` so it can be inspected without identity-provider secrets. The default ports are public `:8080` and admin `127.0.0.1:9901`; change both when another local service owns those ports.
 
 For a minimal local config, use the defaults and add a route/upstream only when testing proxy behavior. Do not commit real client secrets, session keys, certificates, access tokens, or production endpoints.

@@ -31,4 +31,13 @@ curl http://127.0.0.1:9901/api/v1/config/status
 go test ./...
 ```
 
+## Build
+
+```sh
+make build
+make docker-build IMAGE=go-serve:dev
+```
+
+The Docker image runs as a non-root user and uses `config/example.toml` by default. Mount a production configuration and secret files at deployment time rather than baking them into the image.
+
 See [`docs/PLAN.md`](docs/PLAN.md), [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md), [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md), [`config/example.toml`](config/example.toml), and [`api/openapi/control-plane.yaml`](api/openapi/control-plane.yaml) for the design, contributor workflow, and current contracts.
