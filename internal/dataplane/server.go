@@ -1,10 +1,8 @@
 package dataplane
-package dataplane
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -18,9 +16,9 @@ import (
 )
 
 type Server struct {
-	routes     []compiledRoute
+	routes      []compiledRoute
 	maxInFlight chan struct{}
-	maxBody    int64
+	maxBody     int64
 }
 
 type compiledRoute struct {
@@ -31,10 +29,11 @@ type compiledRoute struct {
 }
 
 type upstreamPool struct {
-	endpoints       []*url.URL
-	next            atomic.Uint64
-	requestTimeout  time.Duration
-	transport       *http.Transport
+	endpoints      []*url.URL
+	next           atomic.Uint64
+	requestTimeout time.Duration
+	transport      *http.Transport
+	proxy          *httputil.ReverseProxy
 }
 
 func NewServer(cfg config.Config) (*Server, error) {
@@ -65,7 +64,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 		if requestTimeout <= 0 {
 			requestTimeout = 30 * time.Second
 		}
-		upstreams[upstream.Name] = &upstreamPool{
+		pool := &upstreamPool{
 			endpoints:      endpoints,
 			requestTimeout: requestTimeout,
 			transport: &http.Transport{
@@ -79,6 +78,8 @@ func NewServer(cfg config.Config) (*Server, error) {
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		}
+		pool.proxy = newProxy(pool)
+		upstreams[upstream.Name] = pool
 	}
 
 	routes := make([]compiledRoute, 0, len(cfg.Routes))
@@ -132,7 +133,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(request.Context(), route.upstream.requestTimeout)
 		defer cancel()
-		route.upstream.proxy().ServeHTTP(response, request.WithContext(ctx))
+		route.upstream.proxy.ServeHTTP(response, request.WithContext(ctx))
 	})
 }
 
@@ -161,7 +162,7 @@ func (s *Server) match(request *http.Request) (*compiledRoute, bool) {
 	return best, methodAllowed
 }
 
-func (u *upstreamPool) proxy() *httputil.ReverseProxy {
+func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
 			target := u.endpoints[u.next.Add(1)%uint64(len(u.endpoints))]
@@ -237,5 +238,3 @@ func (connection *limitedConn) Close() error {
 	}
 	return err
 }
-
-var _ io.Reader = (*limitedConn)(nil)

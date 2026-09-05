@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Implemented the concurrent public data plane with host/path routing, longest-prefix matching, method restrictions, reverse proxying, upstream connection pooling, dial/request timeouts, and round-robin endpoint selection.
+- Added bounded in-flight request and request-body limits plus a connection-limiting listener.
+- Wired separate public and control-plane listeners into the shared graceful-shutdown lifecycle.
+- Added data-plane tests for routing, proxy forwarding, method/path rejection, concurrent requests, body limits, and upstream timeouts.
 - Implemented strict TOML file loading through the `-config` flag, including default preservation, unknown-key rejection, and duration parsing.
 - Added immutable, deep-copied configuration snapshots for runtime state isolation.
 - Implemented the control-plane configuration lifecycle with strict JSON decoding, validation, atomic replacement, ETag-based optimistic concurrency, redacted reads, and rollback.
