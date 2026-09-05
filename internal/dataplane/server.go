@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,11 @@ import (
 )
 
 type Server struct {
+	runtime atomic.Pointer[runtimeState]
+}
+
+type runtimeState struct {
+	cfg         config.Config
 	routes      []compiledRoute
 	maxInFlight chan struct{}
 	maxBody     int64
@@ -52,22 +58,38 @@ type upstreamPool struct {
 }
 
 func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
-	if err := cfg.Validate(); err != nil {
+	server := &Server{}
+	if err := server.ReconfigureWithAuthorizer(cfg, firstAuthorizer(authorizers)); err != nil {
 		return nil, err
+	}
+	return server, nil
+}
+
+func (s *Server) Reconfigure(cfg config.Config) error {
+	current := s.runtime.Load()
+	if current != nil && (!reflect.DeepEqual(current.cfg.Server, cfg.Server) || !reflect.DeepEqual(current.cfg.Auth, cfg.Auth) || !reflect.DeepEqual(current.cfg.Cluster, cfg.Cluster)) {
+		return fmt.Errorf("server listeners, authentication, and cluster settings require restart")
+	}
+	return s.ReconfigureWithAuthorizer(cfg, currentAuthorizer(current))
+}
+
+func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authorizer) error {
+	if err := cfg.Validate(); err != nil {
+		return err
 	}
 	upstreams := make(map[string]*upstreamPool, len(cfg.Upstreams))
 	for _, upstream := range cfg.Upstreams {
 		if _, exists := upstreams[upstream.Name]; exists {
-			return nil, fmt.Errorf("duplicate upstream %q", upstream.Name)
+			return fmt.Errorf("duplicate upstream %q", upstream.Name)
 		}
 		if len(upstream.URLs) == 0 {
-			return nil, fmt.Errorf("upstream %q has no URLs", upstream.Name)
+			return fmt.Errorf("upstream %q has no URLs", upstream.Name)
 		}
 		endpoints := make([]*url.URL, 0, len(upstream.URLs))
 		for _, rawURL := range upstream.URLs {
 			target, err := url.Parse(rawURL)
 			if err != nil || target.Scheme == "" || target.Host == "" {
-				return nil, fmt.Errorf("upstream %q has invalid URL %q", upstream.Name, rawURL)
+				return fmt.Errorf("upstream %q has invalid URL %q", upstream.Name, rawURL)
 			}
 			endpoints = append(endpoints, target)
 		}
@@ -127,7 +149,7 @@ func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 	for _, route := range cfg.Routes {
 		upstream, ok := upstreams[route.Upstream]
 		if !ok {
-			return nil, fmt.Errorf("route %q references unknown upstream %q", route.Name, route.Upstream)
+			return fmt.Errorf("route %q references unknown upstream %q", route.Name, route.Upstream)
 		}
 		prefix := route.PathPrefix
 		if prefix == "" {
@@ -148,11 +170,12 @@ func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 	}
 
 	serverContext, stop := context.WithCancel(context.Background())
-	server := &Server{
+	state := &runtimeState{
+		cfg:         cfg.Clone(),
 		routes:      routes,
 		maxInFlight: make(chan struct{}, cfg.Limits.MaxInFlight),
 		maxBody:     cfg.Limits.MaxBodyBytes,
-		authorizer:  firstAuthorizer(authorizers),
+		authorizer:  authorizer,
 		stop:        stop,
 	}
 	for _, upstream := range upstreams {
@@ -160,26 +183,36 @@ func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 			go upstream.healthLoop(serverContext)
 		}
 	}
-	return server, nil
+	previous := s.runtime.Swap(state)
+	if previous != nil && previous.stop != nil {
+		previous.stop()
+	}
+	return nil
 }
 
 func (s *Server) Close() {
-	if s.stop != nil {
-		s.stop()
+	current := s.runtime.Load()
+	if current != nil && current.stop != nil {
+		current.stop()
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		runtime := s.runtime.Load()
+		if runtime == nil {
+			http.Error(response, "data plane is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		select {
-		case s.maxInFlight <- struct{}{}:
-			defer func() { <-s.maxInFlight }()
+		case runtime.maxInFlight <- struct{}{}:
+			defer func() { <-runtime.maxInFlight }()
 		default:
 			http.Error(response, "server is busy", http.StatusServiceUnavailable)
 			return
 		}
-		request.Body = http.MaxBytesReader(response, request.Body, s.maxBody)
-		route, methodAllowed := s.match(request)
+		request.Body = http.MaxBytesReader(response, request.Body, runtime.maxBody)
+		route, methodAllowed := match(runtime.routes, request)
 		if route == nil {
 			if methodAllowed {
 				response.Header().Set("Allow", "GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS")
@@ -190,8 +223,8 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		if route.requireAuth {
-			if s.authorizer == nil || !s.authorizer.Authorize(response, request, route.scopes) {
-				if s.authorizer == nil {
+			if runtime.authorizer == nil || !runtime.authorizer.Authorize(response, request, route.scopes) {
+				if runtime.authorizer == nil {
 					http.Error(response, "authentication is not configured", http.StatusServiceUnavailable)
 				}
 				return
@@ -207,6 +240,13 @@ func (s *Server) Handler() http.Handler {
 	})
 }
 
+func currentAuthorizer(runtime *runtimeState) Authorizer {
+	if runtime == nil {
+		return nil
+	}
+	return runtime.authorizer
+}
+
 func firstAuthorizer(authorizers []Authorizer) Authorizer {
 	if len(authorizers) == 0 {
 		return nil
@@ -214,12 +254,12 @@ func firstAuthorizer(authorizers []Authorizer) Authorizer {
 	return authorizers[0]
 }
 
-func (s *Server) match(request *http.Request) (*compiledRoute, bool) {
+func match(routes []compiledRoute, request *http.Request) (*compiledRoute, bool) {
 	host := normalizeHost(request.Host)
 	var best *compiledRoute
 	methodAllowed := false
-	for index := range s.routes {
-		route := &s.routes[index]
+	for index := range routes {
+		route := &routes[index]
 		if route.host != "" && route.host != host {
 			continue
 		}

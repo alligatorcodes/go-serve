@@ -61,7 +61,7 @@ func main() {
 		}
 	}
 
-	controlHandler := controlplane.NewServer(cfg).Handler()
+	controlHandler := controlplane.NewServer(cfg, dataPlane.Reconfigure).Handler()
 	if clusterNode != nil {
 		controlHandler = clusterNode.Handler(controlHandler)
 	}

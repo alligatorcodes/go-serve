@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Connected control-plane replacement and rollback to an atomic data-plane runtime swap, with failed runtime compilation leaving the previously active data plane and version unchanged.
 - Added an optional HashiCorp Raft clustering foundation with persistent logs/snapshots, leader election, replicated client-instance assignments, peer forwarding, cluster health, and leader/follower virtual-IP command hooks. VIP ownership remains an explicit host/keepalived integration and is not performed directly by the unprivileged process.
 - Added cluster configuration validation, FSM snapshot/restore tests, and a clustering operations guide explaining quorum, VIP ownership, forwarding, and failure handling.
 - Added a `Makefile`, multi-stage non-root `Dockerfile`, and `.dockerignore` for repeatable local and container builds.

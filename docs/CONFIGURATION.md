@@ -17,6 +17,8 @@ Configuration changes must follow this lifecycle:
 
 A failed parse, validation, or compile step must leave the active configuration untouched. Runtime state is held in immutable snapshots; readers receive deep copies and cannot mutate the active snapshot through shared slices or maps.
 
+Control-plane replacement and rollback activate the data-plane runtime before publishing the new control-plane snapshot. Listener addresses, TLS files, authentication settings, and cluster settings are restart-only fields; changing them through the API is rejected until coordinated multi-listener reconfiguration is implemented.
+
 ## Top-level sections
 
 | Section | Purpose |

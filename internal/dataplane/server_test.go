@@ -194,7 +194,7 @@ func TestHealthChecksSelectOnlyHealthyEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer server.Close()
-	pool := server.routes[0].upstream
+	pool := server.runtime.Load().routes[0].upstream
 	pool.checkHealth(context.Background())
 	if pool.healthy[0].Load() || !pool.healthy[1].Load() {
 		t.Fatalf("health states = [%v, %v]", pool.healthy[0].Load(), pool.healthy[1].Load())
@@ -249,6 +249,38 @@ func TestProtectedRouteUsesAuthorizer(t *testing.T) {
 	response = serve(withoutAuthorizer, http.MethodGet, "private.example.com", "/", "")
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("missing authorizer status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestReconfigureAtomicallyChangesUpstream(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte("first"))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte("second"))
+	}))
+	defer second.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{first.URL}}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if response := serve(server, http.MethodGet, "api.example.com", "/", ""); response.Body.String() != "first" {
+		t.Fatalf("initial response = %q", response.Body.String())
+	}
+
+	updated := cfg.Clone()
+	updated.Upstreams[0].URLs = []string{second.URL}
+	if err := server.Reconfigure(updated); err != nil {
+		t.Fatal(err)
+	}
+	if response := serve(server, http.MethodGet, "api.example.com", "/", ""); response.Body.String() != "second" {
+		t.Fatalf("reconfigured response = %q", response.Body.String())
 	}
 }
 

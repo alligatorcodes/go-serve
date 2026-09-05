@@ -3,6 +3,7 @@ package controlplane
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -173,6 +174,35 @@ func TestConcurrentReplacementsHonorVersionCheck(t *testing.T) {
 	}
 	if success != 1 || conflict != 1 {
 		t.Fatalf("concurrent replacement statuses: success=%d conflict=%d", success, conflict)
+	}
+}
+
+func TestReplaceConfigActivatesDataPlaneBeforePublishing(t *testing.T) {
+	activated := 0
+	server := NewServer(config.Default(), func(candidate config.Config) error {
+		activated++
+		if candidate.ControlPlane.UI {
+			return nil
+		}
+		return nil
+	})
+	candidate := config.Default()
+	candidate.ControlPlane.UI = true
+	response := requestJSON(t, server.Handler(), http.MethodPut, "/api/v1/config", candidate, map[string]string{"If-Match": `"0"`})
+	if response.Code != http.StatusOK || activated != 1 {
+		t.Fatalf("activation response = %d, activations = %d", response.Code, activated)
+	}
+
+	failing := NewServer(config.Default(), func(config.Config) error { return errors.New("runtime compile failed") })
+	response = requestJSON(t, failing.Handler(), http.MethodPut, "/api/v1/config", candidate, map[string]string{"If-Match": `"0"`})
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("failed activation status = %d, want %d", response.Code, http.StatusUnprocessableEntity)
+	}
+	status := request(t, failing.Handler(), http.MethodGet, "/api/v1/config/status", "", nil)
+	var body map[string]any
+	decode(t, status, &body)
+	if body["version"] != float64(0) || body["state"] != "failed" {
+		t.Fatalf("failed activation changed published state: %#v", body)
 	}
 }
 

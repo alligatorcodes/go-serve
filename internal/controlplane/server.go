@@ -21,10 +21,15 @@ type Server struct {
 	version  int64
 	state    string
 	lastErr  string
+	activate func(config.Config) error
 }
 
-func NewServer(cfg config.Config) *Server {
-	return &Server{config: config.NewSnapshot(cfg), state: "bootstrap"}
+func NewServer(cfg config.Config, activators ...func(config.Config) error) *Server {
+	var activate func(config.Config) error
+	if len(activators) > 0 {
+		activate = activators[0]
+	}
+	return &Server{config: config.NewSnapshot(cfg), state: "bootstrap", activate: activate}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -146,6 +151,15 @@ func (s *Server) replaceConfig(response http.ResponseWriter, request *http.Reque
 		writeError(response, http.StatusConflict, err)
 		return
 	}
+	if s.activate != nil {
+		if err := s.activate(candidate); err != nil {
+			s.lastErr = err.Error()
+			s.state = "failed"
+			s.mu.Unlock()
+			writeError(response, http.StatusUnprocessableEntity, fmt.Errorf("activate configuration: %w", err))
+			return
+		}
+	}
 	previous := s.config
 	s.previous = previous
 	s.config = config.NewSnapshot(candidate)
@@ -171,6 +185,15 @@ func (s *Server) rollbackConfig(response http.ResponseWriter, request *http.Requ
 		s.mu.Unlock()
 		writeError(response, http.StatusNotFound, errors.New("no rollback target exists"))
 		return
+	}
+	if s.activate != nil {
+		if err := s.activate(s.previous.Config()); err != nil {
+			s.lastErr = err.Error()
+			s.state = "failed"
+			s.mu.Unlock()
+			writeError(response, http.StatusUnprocessableEntity, fmt.Errorf("activate rollback: %w", err))
+			return
+		}
 	}
 	current := s.config
 	s.config = s.previous
