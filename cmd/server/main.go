@@ -17,6 +17,7 @@ import (
 	"github.com/alligatorcodes/go-serve/internal/controlplane"
 	"github.com/alligatorcodes/go-serve/internal/dataplane"
 	"github.com/alligatorcodes/go-serve/internal/observability"
+	runtimemanager "github.com/alligatorcodes/go-serve/internal/runtime"
 )
 
 func main() {
@@ -47,11 +48,12 @@ func main() {
 		}
 		authorizer = authentication
 	}
-	dataPlane, err := dataplane.NewServer(cfg, authorizer)
+	runtimeManager, err := runtimemanager.New(cfg, authorizer)
 	if err != nil {
-		slog.Error("invalid data-plane configuration", "error", err)
+		slog.Error("invalid runtime configuration", "error", err)
 		os.Exit(1)
 	}
+	dataPlane := runtimeManager.DataPlane()
 	var clusterNode *cluster.Node
 	if cfg.Cluster.Enabled {
 		clusterNode, err = cluster.New(context.Background(), cfg.Cluster)
@@ -61,7 +63,7 @@ func main() {
 		}
 	}
 
-	controlHandler := controlplane.NewServer(cfg, dataPlane.Reconfigure).Handler()
+	controlHandler := controlplane.NewServer(cfg, runtimeManager.Activate).Handler()
 	if clusterNode != nil {
 		controlHandler = clusterNode.Handler(controlHandler)
 	}
@@ -129,7 +131,7 @@ func main() {
 		if err := publicServer.Shutdown(shutdown); err != nil {
 			slog.Error("data-plane shutdown failed", "error", err)
 		}
-		dataPlane.Close()
+		runtimeManager.Close()
 		if clusterNode != nil {
 			if err := clusterNode.Close(); err != nil {
 				slog.Error("cluster shutdown failed", "error", err)

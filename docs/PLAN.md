@@ -37,7 +37,7 @@ Keep the control plane and data plane as separate packages and preferably separa
 
 ### Runtime manager
 
-Use one runtime manager as the activation boundary for both planes. A runtime snapshot should contain the validated configuration plus compiled data-plane routes, upstream pools, TLS state, and authentication policy. A successful control-plane write must parse and validate the candidate, compile a complete replacement runtime, atomically swap it, then publish the new control-plane version. If compilation fails, neither live traffic nor the published version changes. Retain the previous runtime for rollback; do not let the control plane and data plane own independent configuration snapshots.
+Use one runtime manager as the activation boundary for both planes. A runtime snapshot should contain the validated configuration plus compiled data-plane routes, upstream pools, TLS state, and authentication policy. A successful control-plane write must parse and validate the candidate, compile a complete replacement runtime, atomically swap it, then publish the new control-plane version. If compilation fails, neither live traffic nor the published version changes. Retain the previous runtime for rollback; do not let the control plane and data plane own independent configuration snapshots. The current implementation provides this boundary through `internal/runtime.Manager`; future TLS, authentication, and cluster reconfiguration should extend that manager rather than adding parallel callbacks.
 
 Suggested repository layout:
 
