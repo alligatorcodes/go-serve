@@ -6,6 +6,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Implemented OAuth2/OIDC authentication offload with provider discovery, JWKS-backed token validation, authorization-code flow with PKCE, encrypted secure session cookies, login/callback/logout endpoints, bearer-token mode, scope authorization, and safe return-path handling.
+- Added route-level authentication enforcement and trusted identity header propagation with client-supplied identity headers removed first.
+- Added authentication tests for bearer verification, scope rejection, session expiry, encrypted cookies, safe redirects, and protected-route integration.
 - Implemented the concurrent public data plane with host/path routing, longest-prefix matching, method restrictions, reverse proxying, upstream connection pooling, dial/request timeouts, and round-robin endpoint selection.
 - Added bounded in-flight request and request-body limits plus a connection-limiting listener.
 - Wired separate public and control-plane listeners into the shared graceful-shutdown lifecycle.
@@ -36,7 +39,5 @@ All notable changes to this project are documented here.
 
 ### Not Yet Implemented
 
-- Public data-plane listener and reverse proxying.
-- OAuth2/OIDC middleware and bearer-token validation.
-- Atomic runtime configuration activation and rollback.
-- OpenAPI document and Swagger UI serving.
+- TLS certificate rotation and broader upstream resilience features.
+- Persistent/shared session storage for multi-instance deployments.

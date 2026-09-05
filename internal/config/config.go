@@ -38,6 +38,7 @@ type AuthConfig struct {
 	IssuerURL         string   `toml:"issuer_url" json:"issuer_url"`
 	ClientID          string   `toml:"client_id" json:"client_id"`
 	ClientSecretFile  string   `toml:"client_secret_file" json:"-"`
+	SessionSecretFile string   `toml:"session_secret_file" json:"-"`
 	RedirectURL       string   `toml:"redirect_url" json:"redirect_url"`
 	SessionCookieName string   `toml:"session_cookie_name" json:"session_cookie_name"`
 	AllowedScopes     []string `toml:"allowed_scopes" json:"allowed_scopes"`
@@ -168,8 +169,16 @@ func (c Config) Validate() error {
 	if c.Auth.Mode != "disabled" && c.Auth.Mode != "oidc" && c.Auth.Mode != "bearer" {
 		return fmt.Errorf("auth.mode must be disabled, oidc, or bearer")
 	}
-	if c.Auth.Mode == "oidc" && (c.Auth.IssuerURL == "" || c.Auth.ClientID == "" || c.Auth.RedirectURL == "") {
-		return fmt.Errorf("oidc requires issuer_url, client_id, and redirect_url")
+	if (c.Auth.Mode == "oidc" || c.Auth.Mode == "bearer") && (c.Auth.IssuerURL == "" || c.Auth.ClientID == "") {
+		return fmt.Errorf("%s requires issuer_url and client_id", c.Auth.Mode)
+	}
+	if c.Auth.Mode == "oidc" && (c.Auth.RedirectURL == "" || c.Auth.ClientSecretFile == "" || c.Auth.SessionSecretFile == "") {
+		return fmt.Errorf("oidc requires redirect_url, client_secret_file, and session_secret_file")
+	}
+	for _, route := range c.Routes {
+		if route.RequireAuth && c.Auth.Mode == "disabled" {
+			return fmt.Errorf("route %q requires authentication but auth.mode is disabled", route.Name)
+		}
 	}
 	if c.Limits.MaxConnections < 1 || c.Limits.MaxInFlight < 1 || c.Limits.MaxHeaderBytes < 1024 || c.Limits.MaxBodyBytes < 1 {
 		return fmt.Errorf("limits must be positive and max_header_bytes must be at least 1024")

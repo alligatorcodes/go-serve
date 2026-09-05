@@ -4,7 +4,7 @@ A production-oriented Go HTTP gateway with a separated control plane and data pl
 
 ## Status
 
-The repository currently contains strict TOML configuration loading, immutable configuration snapshots, concurrent public and control-plane HTTP servers, host/path routing, reverse proxying, request limits, and an OpenAPI specification. Authentication remains planned next.
+The repository currently contains strict TOML configuration loading, immutable configuration snapshots, concurrent public and control-plane HTTP servers, host/path routing, reverse proxying, request limits, OAuth2/OIDC authentication offload, and an OpenAPI specification.
 
 ## Run
 

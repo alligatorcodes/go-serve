@@ -19,13 +19,20 @@ type Server struct {
 	routes      []compiledRoute
 	maxInFlight chan struct{}
 	maxBody     int64
+	authorizer  Authorizer
+}
+
+type Authorizer interface {
+	Authorize(http.ResponseWriter, *http.Request, []string) bool
 }
 
 type compiledRoute struct {
-	host       string
-	pathPrefix string
-	methods    map[string]struct{}
-	upstream   *upstreamPool
+	host        string
+	pathPrefix  string
+	methods     map[string]struct{}
+	requireAuth bool
+	scopes      []string
+	upstream    *upstreamPool
 }
 
 type upstreamPool struct {
@@ -36,7 +43,7 @@ type upstreamPool struct {
 	proxy          *httputil.ReverseProxy
 }
 
-func NewServer(cfg config.Config) (*Server, error) {
+func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -97,10 +104,12 @@ func NewServer(cfg config.Config) (*Server, error) {
 			methods[strings.ToUpper(method)] = struct{}{}
 		}
 		routes = append(routes, compiledRoute{
-			host:       normalizeHost(route.Host),
-			pathPrefix: prefix,
-			methods:    methods,
-			upstream:   upstream,
+			host:        normalizeHost(route.Host),
+			pathPrefix:  prefix,
+			methods:     methods,
+			requireAuth: route.RequireAuth,
+			scopes:      append([]string(nil), route.Scopes...),
+			upstream:    upstream,
 		})
 	}
 
@@ -108,6 +117,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 		routes:      routes,
 		maxInFlight: make(chan struct{}, cfg.Limits.MaxInFlight),
 		maxBody:     cfg.Limits.MaxBodyBytes,
+		authorizer:  firstAuthorizer(authorizers),
 	}, nil
 }
 
@@ -131,10 +141,25 @@ func (s *Server) Handler() http.Handler {
 			http.NotFound(response, request)
 			return
 		}
+		if route.requireAuth {
+			if s.authorizer == nil || !s.authorizer.Authorize(response, request, route.scopes) {
+				if s.authorizer == nil {
+					http.Error(response, "authentication is not configured", http.StatusServiceUnavailable)
+				}
+				return
+			}
+		}
 		ctx, cancel := context.WithTimeout(request.Context(), route.upstream.requestTimeout)
 		defer cancel()
 		route.upstream.proxy.ServeHTTP(response, request.WithContext(ctx))
 	})
+}
+
+func firstAuthorizer(authorizers []Authorizer) Authorizer {
+	if len(authorizers) == 0 {
+		return nil
+	}
+	return authorizers[0]
 }
 
 func (s *Server) match(request *http.Request) (*compiledRoute, bool) {

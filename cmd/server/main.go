@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/example/go-serve/internal/auth"
 	"github.com/example/go-serve/internal/config"
 	"github.com/example/go-serve/internal/controlplane"
 	"github.com/example/go-serve/internal/dataplane"
@@ -21,6 +22,7 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Default()
+	var err error
 	if *configPath != "" {
 		loaded, err := config.LoadFile(*configPath)
 		if err != nil {
@@ -33,7 +35,15 @@ func main() {
 		slog.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
-	dataPlane, err := dataplane.NewServer(cfg)
+	var authorizer dataplane.Authorizer
+	if cfg.Auth.Mode != "disabled" {
+		authorizer, err = auth.New(context.Background(), cfg.Auth)
+		if err != nil {
+			slog.Error("failed to initialize authentication", "error", err)
+			os.Exit(1)
+		}
+	}
+	dataPlane, err := dataplane.NewServer(cfg, authorizer)
 	if err != nil {
 		slog.Error("invalid data-plane configuration", "error", err)
 		os.Exit(1)

@@ -33,6 +33,7 @@ A failed parse, validation, or compile step must leave the active configuration 
 - `control_plane.ui = true` enables Swagger UI only. It does not weaken API authentication or authorization.
 - The admin listener must not be exposed through the public listener by default.
 - `auth.mode = "oidc"` requires `issuer_url`, `client_id`, and `redirect_url`; client secrets come from `client_secret_file` or a future secret-manager integration.
+- OIDC also requires `session_secret_file`, containing at least 32 bytes used to encrypt session cookies. Bearer mode requires `issuer_url` and `client_id` but does not create browser sessions.
 - Route identity headers must be stripped from incoming requests before trusted values are added.
 - Durations use Go duration syntax such as `5s`, `30s`, and `1m`.
 - Configuration responses are redacted and never include client secrets, tokens, session material, or private keys.

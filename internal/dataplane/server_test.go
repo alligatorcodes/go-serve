@@ -119,6 +119,53 @@ func TestUpstreamRequestTimeout(t *testing.T) {
 	}
 }
 
+type testAuthorizer struct {
+	allow bool
+}
+
+func (authorizer testAuthorizer) Authorize(response http.ResponseWriter, request *http.Request, scopes []string) bool {
+	if !authorizer.allow {
+		http.Error(response, "denied", http.StatusUnauthorized)
+		return false
+	}
+	request.Header.Set("X-Authenticated-Subject", "trusted-user")
+	return true
+}
+
+func TestProtectedRouteUsesAuthorizer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Authenticated-Subject") != "trusted-user" {
+			t.Error("trusted identity header was not forwarded")
+		}
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Auth.Mode = "bearer"
+	cfg.Auth.IssuerURL = "https://issuer.example.com"
+	cfg.Auth.ClientID = "gateway"
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}}}
+	cfg.Routes = []config.RouteConfig{{Name: "private", Host: "private.example.com", RequireAuth: true, Upstream: "api"}}
+	server, err := NewServer(cfg, testAuthorizer{allow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := serve(server, http.MethodGet, "private.example.com", "/", "")
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("protected route status = %d", response.Code)
+	}
+
+	withoutAuthorizer, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = serve(withoutAuthorizer, http.MethodGet, "private.example.com", "/", "")
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing authorizer status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+}
+
 func serve(server *Server, method, host, requestPath, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, "http://"+host+requestPath, strings.NewReader(body))
 	response := httptest.NewRecorder()

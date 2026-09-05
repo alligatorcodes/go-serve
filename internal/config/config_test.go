@@ -40,6 +40,8 @@ func TestLoadFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.toml")
 	if err := os.WriteFile(path, []byte(`[auth]
 mode = "bearer"
+issuer_url = "https://issuer.example.com"
+client_id = "gateway"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
