@@ -125,6 +125,19 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
+func (m *Middleware) Protect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth2/login", "/oauth2/callback", "/oauth2/logout":
+			m.Handler(next).ServeHTTP(response, request)
+			return
+		}
+		if m.Authorize(response, request, nil) {
+			next.ServeHTTP(response, request)
+		}
+	})
+}
+
 func (m *Middleware) Authorize(response http.ResponseWriter, request *http.Request, requiredScopes []string) bool {
 	identity, ok := m.authenticate(request)
 	if !ok {

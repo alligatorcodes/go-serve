@@ -94,3 +94,16 @@ func TestBrowserRequestsRedirectToLoginWithSafeReturnPath(t *testing.T) {
 		t.Fatalf("unsafe login redirect: status=%d location=%q", response.Code, location)
 	}
 }
+
+func TestProtectRequiresAuthenticationForAdminRoutes(t *testing.T) {
+	middleware := NewForTest("bearer", fakeVerifier{}, []byte("a sufficiently long test secret for AES"))
+	next := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/docs", nil)
+	response := httptest.NewRecorder()
+	middleware.Protect(next).ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("protected status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}

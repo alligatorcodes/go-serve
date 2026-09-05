@@ -6,6 +6,8 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Protected the control-plane API, OpenAPI document, and documentation UI with the configured authentication middleware while leaving OAuth login/callback/logout endpoints reachable.
+- Upgraded the local documentation page to render the served OpenAPI document without external runtime CDN dependencies.
 - Implemented OAuth2/OIDC authentication offload with provider discovery, JWKS-backed token validation, authorization-code flow with PKCE, encrypted secure session cookies, login/callback/logout endpoints, bearer-token mode, scope authorization, and safe return-path handling.
 - Added route-level authentication enforcement and trusted identity header propagation with client-supplied identity headers removed first.
 - Added authentication tests for bearer verification, scope rejection, session expiry, encrypted cookies, safe redirects, and protected-route integration.

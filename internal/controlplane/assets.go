@@ -18,6 +18,7 @@ const openAPIDocument = `{
 const swaggerUIHTML = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Go Serve API</title>
-<style>body{font-family:system-ui,sans-serif;max-width:56rem;margin:3rem auto;padding:0 1rem;color:#18212b}code{background:#eef2f5;padding:.15rem .3rem}</style></head>
-<body><h1>Go Serve Control Plane</h1><p>OpenAPI document: <a href="/api/openapi.json"><code>/api/openapi.json</code></a></p></body>
+<style>body{font-family:system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#18212b}code,pre{background:#eef2f5;padding:.15rem .3rem}pre{padding:1rem;overflow:auto}</style></head>
+<body><h1>Go Serve Control Plane</h1><p>OpenAPI document: <a href="/api/openapi.json"><code>/api/openapi.json</code></a></p><pre id="spec">Loading API specification...</pre>
+<script>fetch('/api/openapi.json').then(function(r){return r.json()}).then(function(spec){document.getElementById('spec').textContent=JSON.stringify(spec,null,2)}).catch(function(){document.getElementById('spec').textContent='Unable to load API specification'})</script></body>
 </html>`

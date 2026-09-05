@@ -31,6 +31,7 @@ A failed parse, validation, or compile step must leave the active configuration 
 ## Important rules
 
 - `control_plane.ui = true` enables Swagger UI only. It does not weaken API authentication or authorization.
+- When authentication is configured, the admin API, OpenAPI document, and documentation UI require authentication; OAuth login, callback, and logout endpoints remain available to establish a session.
 - The admin listener must not be exposed through the public listener by default.
 - `auth.mode = "oidc"` requires `issuer_url`, `client_id`, and `redirect_url`; client secrets come from `client_secret_file` or a future secret-manager integration.
 - OIDC also requires `session_secret_file`, containing at least 32 bytes used to encrypt session cookies. Bearer mode requires `issuer_url` and `client_id` but does not create browser sessions.

@@ -36,12 +36,14 @@ func main() {
 		os.Exit(1)
 	}
 	var authorizer dataplane.Authorizer
+	var authentication *auth.Middleware
 	if cfg.Auth.Mode != "disabled" {
-		authorizer, err = auth.New(context.Background(), cfg.Auth)
+		authentication, err = auth.New(context.Background(), cfg.Auth)
 		if err != nil {
 			slog.Error("failed to initialize authentication", "error", err)
 			os.Exit(1)
 		}
+		authorizer = authentication
 	}
 	dataPlane, err := dataplane.NewServer(cfg, authorizer)
 	if err != nil {
@@ -49,9 +51,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	controlHandler := controlplane.NewServer(cfg).Handler()
+	if authentication != nil {
+		controlHandler = authentication.Protect(controlHandler)
+	}
 	controlServer := &http.Server{
 		Addr:              cfg.Server.AdminAddr,
-		Handler:           controlplane.NewServer(cfg).Handler(),
+		Handler:           controlHandler,
 		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
