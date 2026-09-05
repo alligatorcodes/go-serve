@@ -31,4 +31,4 @@ curl http://127.0.0.1:9901/api/v1/config/status
 go test ./...
 ```
 
-See [`docs/PLAN.md`](docs/PLAN.md), [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md), [`config/example.toml`](config/example.toml), and [`api/openapi/control-plane.yaml`](api/openapi/control-plane.yaml) for the design and current contracts.
+See [`docs/PLAN.md`](docs/PLAN.md), [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md), [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md), [`config/example.toml`](config/example.toml), and [`api/openapi/control-plane.yaml`](api/openapi/control-plane.yaml) for the design, contributor workflow, and current contracts.

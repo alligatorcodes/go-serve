@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added `docs/CONTRIBUTING.md` with architecture guidance, development workflow, testing expectations, security practices, troubleshooting, and pull-request checklist.
 - Added request metrics and structured request logging, with `/metrics` and pprof exposed only through the authenticated control-plane listener.
 - Added configuration fuzz coverage and an operations/security guide covering listener isolation, secret handling, release checks, and runtime probes.
 - Added bounded idempotent-method retries and cooldown-based upstream circuit breakers; unsafe methods are never retried automatically.
