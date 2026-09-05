@@ -20,6 +20,9 @@ Use `/health` for process liveness and `/ready` for traffic readiness. A deploym
 - Inject OIDC client and session secrets through files or a secret manager.
 - Restrict pprof and metrics to trusted operators.
 - Use TLS for public traffic and OIDC redirects outside local development.
+- For clustering, use three or five voting nodes, keep the Raft port private, and store each node's Raft data on its own durable volume.
+- Treat virtual-IP ownership as a host integration: use audited, idempotent leader/follower hooks or keepalived rather than granting the gateway broad network privileges.
+- Monitor leader changes, quorum loss, assignment expiry, forwarding failures, and VIP hook failures.
 - Review route `require_auth`, `scopes`, body limits, upstream timeouts, retries, and circuit-breaker thresholds before production.
 - Do not log tokens, cookies, authorization codes, or secret file contents.
 

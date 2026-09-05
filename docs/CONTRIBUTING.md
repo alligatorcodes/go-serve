@@ -33,6 +33,10 @@ internal/auth/
 internal/observability/
   request logging, counters, metrics exposition, active-request tracking
 
+internal/cluster/
+  persistent Raft consensus, replicated client assignments, leader hooks,
+  virtual-IP integration points, and peer forwarding
+
 api/openapi/
   versioned control-plane API contract
 config/
@@ -137,6 +141,10 @@ At the end of every implementation step:
 1. Update `docs/CHANGELOG.md`.
 2. Run the relevant tests and static checks.
 3. Commit the completed step with a focused message.
+
+### Cluster changes
+
+Keep consensus state small and deterministic. Never store request bodies, access tokens, cookies, or secrets in the Raft FSM. Test snapshot/restore and leader/follower transitions without requiring a live multi-node deployment. Changes to VIP hooks must remain idempotent and must not silently grant the process extra host privileges.
 
 ## Testing Expectations
 

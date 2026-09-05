@@ -4,7 +4,7 @@ A production-oriented Go HTTP gateway with a separated control plane and data pl
 
 ## Status
 
-The repository currently contains strict TOML configuration loading, immutable configuration snapshots, concurrent public and control-plane HTTP servers, host/path routing, reverse proxying, request limits, OAuth2/OIDC authentication offload, and an OpenAPI specification.
+The repository currently contains strict TOML configuration loading, immutable configuration snapshots, concurrent public and control-plane HTTP servers, host/path routing, reverse proxying, request limits, OAuth2/OIDC authentication offload, OpenAPI documentation, and an optional Raft-backed clustering foundation.
 
 ## Run
 
@@ -40,4 +40,4 @@ make docker-build IMAGE=go-serve:dev
 
 The Docker image runs as a non-root user and uses `config/example.toml` by default. Mount a production configuration and secret files at deployment time rather than baking them into the image.
 
-See [`docs/PLAN.md`](docs/PLAN.md), [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md), [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md), [`config/example.toml`](config/example.toml), and [`api/openapi/control-plane.yaml`](api/openapi/control-plane.yaml) for the design, contributor workflow, and current contracts.
+See [`docs/PLAN.md`](docs/PLAN.md), [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md), [`docs/CLUSTERING.md`](docs/CLUSTERING.md), [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md), [`config/example.toml`](config/example.toml), and [`api/openapi/control-plane.yaml`](api/openapi/control-plane.yaml) for the design, contributor workflow, cluster operations, and current contracts.

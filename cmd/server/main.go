@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/example/go-serve/internal/auth"
+	"github.com/example/go-serve/internal/cluster"
 	"github.com/example/go-serve/internal/config"
 	"github.com/example/go-serve/internal/controlplane"
 	"github.com/example/go-serve/internal/dataplane"
@@ -51,8 +52,19 @@ func main() {
 		slog.Error("invalid data-plane configuration", "error", err)
 		os.Exit(1)
 	}
+	var clusterNode *cluster.Node
+	if cfg.Cluster.Enabled {
+		clusterNode, err = cluster.New(context.Background(), cfg.Cluster)
+		if err != nil {
+			slog.Error("failed to initialize cluster", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	controlHandler := controlplane.NewServer(cfg).Handler()
+	if clusterNode != nil {
+		controlHandler = clusterNode.Handler(controlHandler)
+	}
 	metrics := observability.New()
 	controlHandler = metrics.Endpoint(metrics.Middleware(controlHandler))
 	if authentication != nil {
@@ -66,9 +78,13 @@ func main() {
 		WriteTimeout:      cfg.Server.WriteTimeout,
 		IdleTimeout:       cfg.Server.IdleTimeout,
 	}
+	publicHandler := dataPlane.Handler()
+	if clusterNode != nil {
+		publicHandler = clusterNode.Proxy(publicHandler)
+	}
 	publicServer := &http.Server{
 		Addr:              cfg.Server.PublicAddr,
-		Handler:           metrics.Middleware(dataPlane.Handler()),
+		Handler:           metrics.Middleware(publicHandler),
 		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
@@ -114,6 +130,11 @@ func main() {
 			slog.Error("data-plane shutdown failed", "error", err)
 		}
 		dataPlane.Close()
+		if clusterNode != nil {
+			if err := clusterNode.Close(); err != nil {
+				slog.Error("cluster shutdown failed", "error", err)
+			}
+		}
 	}()
 
 	slog.Info("starting control plane", "addr", controlServer.Addr, "ui", cfg.ControlPlane.UI)

@@ -11,11 +11,34 @@ import (
 // Config is the validated desired state for both listeners and runtime policy.
 type Config struct {
 	Server       ServerConfig       `toml:"server" json:"server"`
+	Cluster      ClusterConfig      `toml:"cluster" json:"cluster"`
 	ControlPlane ControlPlaneConfig `toml:"control_plane" json:"control_plane"`
 	Auth         AuthConfig         `toml:"auth" json:"auth"`
 	Limits       LimitsConfig       `toml:"limits" json:"limits"`
 	Routes       []RouteConfig      `toml:"routes" json:"routes"`
 	Upstreams    []UpstreamConfig   `toml:"upstreams" json:"upstreams"`
+}
+
+type ClusterConfig struct {
+	Enabled           bool          `toml:"enabled" json:"enabled"`
+	NodeID            string        `toml:"node_id" json:"node_id"`
+	BindAddr          string        `toml:"bind_addr" json:"bind_addr"`
+	AdvertiseAddr     string        `toml:"advertise_addr" json:"advertise_addr"`
+	DataDir           string        `toml:"data_dir" json:"data_dir"`
+	Bootstrap         bool          `toml:"bootstrap" json:"bootstrap"`
+	Peers             []ClusterPeer `toml:"peers" json:"peers"`
+	VirtualIP         string        `toml:"virtual_ip" json:"virtual_ip"`
+	Interface         string        `toml:"interface" json:"interface"`
+	OnLeaderCommand   string        `toml:"on_leader_command" json:"-"`
+	OnFollowerCommand string        `toml:"on_follower_command" json:"-"`
+	ForwardTimeout    time.Duration `toml:"forward_timeout" json:"forward_timeout"`
+	AssignmentTTL     time.Duration `toml:"assignment_ttl" json:"assignment_ttl"`
+}
+
+type ClusterPeer struct {
+	ID        string `toml:"id" json:"id"`
+	Address   string `toml:"address" json:"address"`
+	PublicURL string `toml:"public_url" json:"public_url"`
 }
 
 type ServerConfig struct {
@@ -118,6 +141,7 @@ func (c Config) Clone() Config {
 	clone.Auth.AllowedScopes = append([]string(nil), c.Auth.AllowedScopes...)
 	clone.Routes = append([]RouteConfig(nil), c.Routes...)
 	clone.Upstreams = append([]UpstreamConfig(nil), c.Upstreams...)
+	clone.Cluster.Peers = append([]ClusterPeer(nil), c.Cluster.Peers...)
 	for index := range clone.Routes {
 		clone.Routes[index].Methods = append([]string(nil), c.Routes[index].Methods...)
 		clone.Routes[index].Scopes = append([]string(nil), c.Routes[index].Scopes...)
@@ -151,6 +175,10 @@ func Default() Config {
 			IdleTimeout:       60 * time.Second,
 			ShutdownTimeout:   15 * time.Second,
 		},
+		Cluster: ClusterConfig{
+			ForwardTimeout: 5 * time.Second,
+			AssignmentTTL:  10 * time.Minute,
+		},
 		ControlPlane: ControlPlaneConfig{
 			UI:          false,
 			OpenAPIPath: "/api/openapi.json",
@@ -171,6 +199,24 @@ func (c Config) Validate() error {
 	}
 	if (c.Server.TLSCertFile == "") != (c.Server.TLSKeyFile == "") {
 		return fmt.Errorf("tls_cert_file and tls_key_file must be configured together")
+	}
+	if c.Cluster.Enabled {
+		if c.Cluster.NodeID == "" || c.Cluster.BindAddr == "" || c.Cluster.AdvertiseAddr == "" || c.Cluster.DataDir == "" {
+			return fmt.Errorf("cluster requires node_id, bind_addr, advertise_addr, and data_dir")
+		}
+		if c.Cluster.ForwardTimeout <= 0 || c.Cluster.AssignmentTTL <= 0 {
+			return fmt.Errorf("cluster forward_timeout and assignment_ttl must be positive")
+		}
+		seen := map[string]struct{}{c.Cluster.NodeID: {}}
+		for _, peer := range c.Cluster.Peers {
+			if peer.ID == "" || peer.Address == "" {
+				return fmt.Errorf("cluster peers require id and address")
+			}
+			if _, exists := seen[peer.ID]; exists {
+				return fmt.Errorf("duplicate cluster node id %q", peer.ID)
+			}
+			seen[peer.ID] = struct{}{}
+		}
 	}
 	if c.ControlPlane.OpenAPIPath == "" || c.ControlPlane.OpenAPIPath[0] != '/' {
 		return fmt.Errorf("control_plane.openapi_path must be an absolute URL path")

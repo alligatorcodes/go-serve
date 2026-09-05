@@ -81,3 +81,11 @@ func TestTLSFilesMustBeConfiguredTogether(t *testing.T) {
 		t.Fatalf("error = %v, want paired TLS-file error", err)
 	}
 }
+
+func TestClusterConfigurationRequiresConsensusFields(t *testing.T) {
+	value := Default()
+	value.Cluster.Enabled = true
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "cluster requires") {
+		t.Fatalf("error = %v, want cluster field validation", err)
+	}
+}
