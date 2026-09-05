@@ -93,7 +93,7 @@ Requirements:
 - Retain the last-known-good snapshot and support explicit rollback.
 - Associate every active snapshot with a monotonically increasing version and audit event.
 - Treat listener addresses, TLS files, authentication identity-provider settings, and cluster membership as restart-only until coordinated multi-listener reconfiguration is implemented.
-- Either implement `route.headers` with explicit request-header set/remove semantics, or remove it from the public schema until implemented. Do not expose configuration fields that silently do nothing.
+- `route.headers` is implemented as request-header set semantics with a denylist for credentials and trusted identity headers. Response transforms and explicit add/remove operations remain separate future features.
 
 The published module path is `github.com/alligatorcodes/go-serve`, matching the repository. Keep internal imports, deployment examples, and release metadata aligned with this canonical path.
 
@@ -266,7 +266,7 @@ Before adding more gateway features, close these review findings in order:
 2. **Repository identity:** change the placeholder Go module path and all imports to the canonical repository path before publishing releases.
 3. **OIDC correctness:** add nonce generation, state binding, and callback nonce validation; require secure redirect URLs outside an explicit development mode.
 4. **Upstream isolation:** use a health-check transport independent of request retries/circuit breakers, then move breaker state to individual endpoints with guarded half-open recovery.
-5. **Proxy correctness:** define route-header semantics and test URL paths without filesystem normalization. Preserve escaped paths, repeated slashes, trailing slashes, `RawPath`, and encoded separators; add streaming, WebSocket, and `ResponseWriter` interface coverage or document unsupported protocols.
+5. **Proxy correctness:** preserve escaped paths, repeated slashes, trailing slashes, `RawPath`, and encoded separators; add streaming, WebSocket, and `ResponseWriter` interface coverage or document unsupported protocols. Request-header set semantics are implemented with credential/trusted-header protection.
 6. **Lifecycle truthfulness:** make readiness reflect activation, dependencies, draining, and cluster health. Flip readiness before shutdown and allow load balancers to observe the change.
 7. **Operational signal:** add bounded route/upstream/method/status dimensions and counters for retries, auth failures, health failures, circuit transitions, configuration activation, and request rejection. Include route, upstream, config version, and node identity in logs.
 

@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Implemented route request-header set semantics with trusted-header stripping and escaped URL path preservation for repeated slashes, trailing slashes, encoded separators, and dot segments.
 - Isolated active health checks from request retries/circuit breakers and moved circuit state to individual endpoints with guarded half-open recovery.
 - Added OIDC nonce generation, state binding, callback nonce validation, and secure-by-default redirect URL enforcement with explicit insecure-development opt-in.
 - Added an explicit `internal/runtime.Manager` activation boundary shared by the Control Plane and Data Plane, with live reconfiguration and restart-only setting protection.

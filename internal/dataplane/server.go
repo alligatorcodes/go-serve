@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"path"
 	"reflect"
 	"strings"
 	"sync"
@@ -39,6 +38,7 @@ type compiledRoute struct {
 	host        string
 	pathPrefix  string
 	methods     map[string]struct{}
+	headers     map[string]string
 	requireAuth bool
 	scopes      []string
 	upstream    *upstreamPool
@@ -170,6 +170,7 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			methods:     methods,
 			requireAuth: route.RequireAuth,
 			scopes:      append([]string(nil), route.Scopes...),
+			headers:     cloneHeaders(route.Headers),
 			upstream:    upstream,
 		})
 	}
@@ -217,6 +218,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		request.Body = http.MaxBytesReader(response, request.Body, runtime.maxBody)
+		stripTrustedHeaders(request)
 		route, methodAllowed := match(runtime.routes, request)
 		if route == nil {
 			if methodAllowed {
@@ -239,6 +241,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(response, "upstream unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		applyRouteHeaders(request, route.headers)
 		ctx, cancel := context.WithTimeout(request.Context(), route.upstream.requestTimeout)
 		defer cancel()
 		route.upstream.proxy.ServeHTTP(response, request.WithContext(ctx))
@@ -291,8 +294,7 @@ func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 			request.URL.Scheme = target.Scheme
 			request.URL.Host = target.Host
 			request.Host = target.Host
-			request.URL.Path = joinURLPath(target.Path, request.URL.Path)
-			request.URL.RawPath = ""
+			joinProxyPath(target, request.URL)
 			*request = *request.WithContext(context.WithValue(request.Context(), endpointIndexKey{}, index))
 		},
 		Transport: u.transport,
@@ -456,7 +458,58 @@ func joinURLPath(base, requestPath string) string {
 	if base == "" {
 		return requestPath
 	}
-	return path.Join(base, requestPath)
+	if requestPath == "" {
+		return base
+	}
+	if strings.HasSuffix(base, "/") && strings.HasPrefix(requestPath, "/") {
+		return base + requestPath[1:]
+	}
+	if !strings.HasSuffix(base, "/") && !strings.HasPrefix(requestPath, "/") {
+		return base + "/" + requestPath
+	}
+	return base + requestPath
+}
+
+func joinProxyPath(target *url.URL, requestURL *url.URL) {
+	base := target.EscapedPath()
+	requestPath := requestURL.EscapedPath()
+	joined := joinURLPath(base, requestPath)
+	decoded, err := url.PathUnescape(joined)
+	if err != nil {
+		return
+	}
+	requestURL.Path = decoded
+	if decoded == joined {
+		requestURL.RawPath = ""
+	} else {
+		requestURL.RawPath = joined
+	}
+}
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	clone := make(map[string]string, len(headers))
+	for key, value := range headers {
+		clone[key] = value
+	}
+	return clone
+}
+
+func applyRouteHeaders(request *http.Request, headers map[string]string) {
+	for key, value := range headers {
+		canonical := http.CanonicalHeaderKey(key)
+		switch canonical {
+		case "X-Authenticated-Subject", "X-Authenticated-Email", "X-Authenticated-Scopes", "Authorization", "Cookie":
+			continue
+		default:
+			request.Header.Set(canonical, value)
+		}
+	}
+}
+
+func stripTrustedHeaders(request *http.Request) {
+	request.Header.Del("X-Authenticated-Subject")
+	request.Header.Del("X-Authenticated-Email")
+	request.Header.Del("X-Authenticated-Scopes")
 }
 
 // LimitListener applies an admission limit to active connections. Accepted

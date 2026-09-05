@@ -41,6 +41,68 @@ func TestRoutesAndProxiesRequest(t *testing.T) {
 	}
 }
 
+func TestRouteHeadersSetUpstreamRequestHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("X-Seen-Header", request.Header.Get("X-Route-Header"))
+		response.Header().Set("X-Seen-Subject", request.Header.Get("X-Authenticated-Subject"))
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api", Headers: map[string]string{
+		"x-route-header":          "configured",
+		"X-Authenticated-Subject": "spoofed",
+	}}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://api.example.com/", nil)
+	request.Header.Set("X-Route-Header", "client-value")
+	request.Header.Set("X-Authenticated-Subject", "client-value")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Header().Get("X-Seen-Header") != "configured" || response.Header().Get("X-Seen-Subject") != "" {
+		t.Fatalf("route headers were unsafe or ignored: configured=%q subject=%q", response.Header().Get("X-Seen-Header"), response.Header().Get("X-Seen-Subject"))
+	}
+}
+
+func TestProxyPreservesEscapedAndTrailingURLPaths(t *testing.T) {
+	paths := make(chan string, 8)
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		paths <- request.URL.RequestURI()
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL + "/base"}}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", PathPrefix: "/api", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, requestPath := range []string{"/api/foo", "/api/foo/", "/api//foo", "/api/foo%2Fbar", "/api/foo/../bar"} {
+		response := serve(server, http.MethodGet, "api.example.com", requestPath, "")
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("path %q status = %d", requestPath, response.Code)
+		}
+	}
+	want := []string{"/base/api/foo", "/base/api/foo/", "/base/api//foo", "/base/api/foo%2Fbar", "/base/api/foo/../bar"}
+	for _, expected := range want {
+		select {
+		case actual := <-paths:
+			if actual != expected {
+				t.Fatalf("upstream path = %q, want %q", actual, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for upstream path %q", expected)
+		}
+	}
+}
+
 func TestRouteMethodAndPathRejection(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)

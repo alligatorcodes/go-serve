@@ -39,6 +39,7 @@ Control-plane replacement and rollback activate the data-plane runtime before pu
 - OIDC also requires `session_secret_file`, containing at least 32 bytes used to encrypt session cookies. Bearer mode requires `issuer_url` and `client_id` but does not create browser sessions.
 - OIDC redirect URLs must use HTTPS by default. `allow_insecure_redirect = true` is for explicitly controlled local development only.
 - Route identity headers must be stripped from incoming requests before trusted values are added.
+- `routes.headers` sets request headers sent to the upstream. Client-controlled `Authorization`, `Cookie`, and trusted `X-Authenticated-*` headers are never set by this feature; response-header transforms and add/remove operations are separate future features.
 - Durations use Go duration syntax such as `5s`, `30s`, and `1m`.
 - Configure both `server.tls_cert_file` and `server.tls_key_file` to enable TLS termination. Certificates are reloaded for new handshakes when either file changes.
 - `upstreams.health_path` enables active health checks; unhealthy endpoints are removed from selection until a later check succeeds.
