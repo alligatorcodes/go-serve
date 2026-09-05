@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/config"
 )
 
 func TestRoutesAndProxiesRequest(t *testing.T) {

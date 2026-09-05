@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alligatorcodes/go-serve/internal/config"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/example/go-serve/internal/config"
 	"golang.org/x/oauth2"
 )
 

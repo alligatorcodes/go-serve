@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Migrated the Go module and internal imports from the placeholder path to the canonical `github.com/alligatorcodes/go-serve` repository path.
 - Updated `docs/PLAN.md` with feedback-driven priorities covering runtime activation, module identity, OIDC nonce validation, endpoint-level resilience, proxy URL/header correctness, readiness semantics, and richer observability.
 - Connected control-plane replacement and rollback to an atomic data-plane runtime swap, with failed runtime compilation leaving the previously active data plane and version unchanged.
 - Added an optional HashiCorp Raft clustering foundation with persistent logs/snapshots, leader election, replicated client-instance assignments, peer forwarding, cluster health, and leader/follower virtual-IP command hooks. VIP ownership remains an explicit host/keepalived integration and is not performed directly by the unprivileged process.

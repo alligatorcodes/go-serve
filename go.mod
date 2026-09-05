@@ -1,4 +1,4 @@
-module github.com/example/go-serve
+module github.com/alligatorcodes/go-serve
 
 go 1.23.0
 

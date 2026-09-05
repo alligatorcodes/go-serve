@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/example/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/config"
 )
 
 type Server struct {

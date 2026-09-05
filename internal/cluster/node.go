@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/config"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"

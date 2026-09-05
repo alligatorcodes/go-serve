@@ -11,12 +11,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/example/go-serve/internal/auth"
-	"github.com/example/go-serve/internal/cluster"
-	"github.com/example/go-serve/internal/config"
-	"github.com/example/go-serve/internal/controlplane"
-	"github.com/example/go-serve/internal/dataplane"
-	"github.com/example/go-serve/internal/observability"
+	"github.com/alligatorcodes/go-serve/internal/auth"
+	"github.com/alligatorcodes/go-serve/internal/cluster"
+	"github.com/alligatorcodes/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/controlplane"
+	"github.com/alligatorcodes/go-serve/internal/dataplane"
+	"github.com/alligatorcodes/go-serve/internal/observability"
 )
 
 func main() {

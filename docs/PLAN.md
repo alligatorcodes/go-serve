@@ -95,7 +95,7 @@ Requirements:
 - Treat listener addresses, TLS files, authentication identity-provider settings, and cluster membership as restart-only until coordinated multi-listener reconfiguration is implemented.
 - Either implement `route.headers` with explicit request-header set/remove semantics, or remove it from the public schema until implemented. Do not expose configuration fields that silently do nothing.
 
-The published module path must match the repository. Before release, replace placeholder import paths such as `github.com/example/go-serve` with the canonical repository module path and verify all internal imports and deployment examples.
+The published module path is `github.com/alligatorcodes/go-serve`, matching the repository. Keep internal imports, deployment examples, and release metadata aligned with this canonical path.
 
 ## OAuth2/OIDC Authentication Offload
 
