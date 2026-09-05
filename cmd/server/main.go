@@ -15,6 +15,7 @@ import (
 	"github.com/example/go-serve/internal/config"
 	"github.com/example/go-serve/internal/controlplane"
 	"github.com/example/go-serve/internal/dataplane"
+	"github.com/example/go-serve/internal/observability"
 )
 
 func main() {
@@ -52,6 +53,8 @@ func main() {
 	}
 
 	controlHandler := controlplane.NewServer(cfg).Handler()
+	metrics := observability.New()
+	controlHandler = metrics.Endpoint(metrics.Middleware(controlHandler))
 	if authentication != nil {
 		controlHandler = authentication.Protect(controlHandler)
 	}
@@ -65,7 +68,7 @@ func main() {
 	}
 	publicServer := &http.Server{
 		Addr:              cfg.Server.PublicAddr,
-		Handler:           dataPlane.Handler(),
+		Handler:           metrics.Middleware(dataPlane.Handler()),
 		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,

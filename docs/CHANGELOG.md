@@ -6,6 +6,8 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added request metrics and structured request logging, with `/metrics` and pprof exposed only through the authenticated control-plane listener.
+- Added configuration fuzz coverage and an operations/security guide covering listener isolation, secret handling, release checks, and runtime probes.
 - Added bounded idempotent-method retries and cooldown-based upstream circuit breakers; unsafe methods are never retried automatically.
 - Added optional TLS termination with TLS 1.2 minimums and certificate/key reloads for new handshakes.
 - Added active upstream health checks with healthy-endpoint selection and clean health-worker shutdown.
