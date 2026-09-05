@@ -39,6 +39,9 @@ name = "api"
 urls = ["http://127.0.0.1:9000"]
 health_path = "/health"
 health_interval = "10s"
+retry_attempts = 1
+circuit_breaker_threshold = 5
+circuit_breaker_cooldown = "10s"
 dial_timeout = "2s"
 request_timeout = "30s"
 

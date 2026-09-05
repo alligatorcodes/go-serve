@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added bounded idempotent-method retries and cooldown-based upstream circuit breakers; unsafe methods are never retried automatically.
 - Added optional TLS termination with TLS 1.2 minimums and certificate/key reloads for new handshakes.
 - Added active upstream health checks with healthy-endpoint selection and clean health-worker shutdown.
 - Added systemd and Kubernetes deployment examples with non-root execution, probes, resource hardening, and graceful termination settings.
@@ -45,5 +46,5 @@ All notable changes to this project are documented here.
 
 ### Not Yet Implemented
 
-- TLS certificate rotation and broader upstream resilience features.
+- Broader upstream resilience features such as outlier detection.
 - Persistent/shared session storage for multi-instance deployments.

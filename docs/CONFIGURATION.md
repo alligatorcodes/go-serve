@@ -39,5 +39,6 @@ A failed parse, validation, or compile step must leave the active configuration 
 - Durations use Go duration syntax such as `5s`, `30s`, and `1m`.
 - Configure both `server.tls_cert_file` and `server.tls_key_file` to enable TLS termination. Certificates are reloaded for new handshakes when either file changes.
 - `upstreams.health_path` enables active health checks; unhealthy endpoints are removed from selection until a later check succeeds.
+- `upstreams.retry_attempts` applies only to idempotent methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, and `DELETE`). `circuit_breaker_threshold` and `circuit_breaker_cooldown` bound repeated upstream failures.
 - Configuration responses are redacted and never include client secrets, tokens, session material, or private keys.
 - `PUT /api/v1/config` requires the current `ETag` through `If-Match` to prevent lost updates.

@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -118,6 +119,57 @@ func TestUpstreamRequestTimeout(t *testing.T) {
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("timeout status = %d, want %d", response.Code, http.StatusBadGateway)
 	}
+}
+
+func TestRetryTransportRetriesOnlySafeMethods(t *testing.T) {
+	calls := 0
+	transport := &retryTransport{
+		attempts: 1,
+		breaker:  &circuitBreaker{threshold: 5, cooldown: time.Minute},
+		base: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}),
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil)
+	response, err := transport.RoundTrip(request)
+	if err != nil || response.StatusCode != http.StatusNoContent || calls != 2 {
+		t.Fatalf("GET retry result = response=%v err=%v calls=%d", response, err, calls)
+	}
+
+	calls = 0
+	request = httptest.NewRequest(http.MethodPost, "http://upstream.test", strings.NewReader("body"))
+	response, err = transport.RoundTrip(request)
+	if err != nil || response.StatusCode != http.StatusBadGateway || calls != 1 {
+		t.Fatalf("POST retry result = response=%v err=%v calls=%d", response, err, calls)
+	}
+}
+
+func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
+	calls := 0
+	transport := &retryTransport{
+		breaker: &circuitBreaker{threshold: 2, cooldown: time.Hour},
+		base: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("connection failed")
+		}),
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://upstream.test", nil)
+	_, _ = transport.RoundTrip(request)
+	_, _ = transport.RoundTrip(request)
+	_, err := transport.RoundTrip(request)
+	if err == nil || calls != 2 {
+		t.Fatalf("circuit result = err=%v calls=%d", err, calls)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
 }
 
 func TestHealthChecksSelectOnlyHealthyEndpoints(t *testing.T) {

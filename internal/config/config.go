@@ -65,12 +65,15 @@ type RouteConfig struct {
 }
 
 type UpstreamConfig struct {
-	Name           string        `toml:"name" json:"name"`
-	URLs           []string      `toml:"urls" json:"urls"`
-	HealthPath     string        `toml:"health_path" json:"health_path"`
-	DialTimeout    time.Duration `toml:"dial_timeout" json:"dial_timeout"`
-	RequestTimeout time.Duration `toml:"request_timeout" json:"request_timeout"`
-	HealthInterval time.Duration `toml:"health_interval" json:"health_interval"`
+	Name                    string        `toml:"name" json:"name"`
+	URLs                    []string      `toml:"urls" json:"urls"`
+	HealthPath              string        `toml:"health_path" json:"health_path"`
+	DialTimeout             time.Duration `toml:"dial_timeout" json:"dial_timeout"`
+	RequestTimeout          time.Duration `toml:"request_timeout" json:"request_timeout"`
+	HealthInterval          time.Duration `toml:"health_interval" json:"health_interval"`
+	RetryAttempts           int           `toml:"retry_attempts" json:"retry_attempts"`
+	CircuitBreakerThreshold int           `toml:"circuit_breaker_threshold" json:"circuit_breaker_threshold"`
+	CircuitBreakerCooldown  time.Duration `toml:"circuit_breaker_cooldown" json:"circuit_breaker_cooldown"`
 }
 
 // Snapshot is an immutable copy of a validated configuration. Config returns
