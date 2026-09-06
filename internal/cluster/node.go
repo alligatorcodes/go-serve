@@ -107,6 +107,16 @@ func (n *Node) IsLeader() bool          { return n.raft.State() == raft.Leader }
 func (n *Node) LeaderAddress() string   { return string(n.raft.Leader()) }
 func (n *Node) Leadership() <-chan bool { return n.leadership }
 
+func (n *Node) Ready() (bool, string) {
+	if n.raft == nil || n.raft.State() == raft.Shutdown {
+		return false, "cluster_unavailable"
+	}
+	if n.LeaderAddress() == "" {
+		return false, "cluster_no_leader"
+	}
+	return true, "ready"
+}
+
 func (n *Node) Join(ctx context.Context, peer config.ClusterPeer) error {
 	future := n.raft.AddVoter(raft.ServerID(peer.ID), raft.ServerAddress(peer.Address), 0, 10*time.Second)
 	return future.Error()

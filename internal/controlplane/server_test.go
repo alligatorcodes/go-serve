@@ -45,6 +45,30 @@ func TestReadinessTurnsFalseDuringDrain(t *testing.T) {
 	}
 }
 
+func TestReadinessReflectsDependencyState(t *testing.T) {
+	server := NewServer(config.Default())
+	ready := true
+	server.SetReadinessCheck(func() (bool, string) {
+		if !ready {
+			return false, "cluster_no_leader"
+		}
+		return true, "ready"
+	})
+	if response := request(t, server.Handler(), http.MethodGet, "/ready", "", nil); response.Code != http.StatusOK {
+		t.Fatalf("ready dependency status = %d", response.Code)
+	}
+	ready = false
+	response := request(t, server.Handler(), http.MethodGet, "/ready", "", nil)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unready dependency status = %d", response.Code)
+	}
+	var body map[string]string
+	decode(t, response, &body)
+	if body["status"] != "cluster_no_leader" {
+		t.Fatalf("unready dependency body = %#v", body)
+	}
+}
+
 func TestValidateDoesNotActivateConfiguration(t *testing.T) {
 	server := NewServer(config.Default())
 	candidate := config.Default()

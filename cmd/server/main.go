@@ -65,6 +65,9 @@ func main() {
 	}
 
 	controlPlane := controlplane.NewServer(cfg, runtimeManager.Activate)
+	if clusterNode != nil {
+		controlPlane.SetReadinessCheck(clusterNode.Ready)
+	}
 	controlHandler := controlPlane.Handler()
 	if clusterNode != nil {
 		controlHandler = clusterNode.Handler(controlHandler)

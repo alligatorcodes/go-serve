@@ -23,6 +23,7 @@ type Server struct {
 	lastErr    string
 	activate   func(config.Config) error
 	readyState bool
+	readiness  func() (bool, string)
 }
 
 func NewServer(cfg config.Config, activators ...func(config.Config) error) *Server {
@@ -37,6 +38,12 @@ func (s *Server) SetDraining() {
 	s.mu.Lock()
 	s.readyState = false
 	s.state = "draining"
+	s.mu.Unlock()
+}
+
+func (s *Server) SetReadinessCheck(check func() (bool, string)) {
+	s.mu.Lock()
+	s.readiness = check
 	s.mu.Unlock()
 }
 
@@ -69,10 +76,18 @@ func (s *Server) ready(response http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	ready := s.readyState
 	state := s.state
+	check := s.readiness
 	s.mu.RUnlock()
 	if !ready {
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"status": state})
 		return
+	}
+	if check != nil {
+		dependencyReady, dependencyState := check()
+		if !dependencyReady {
+			writeJSON(response, http.StatusServiceUnavailable, map[string]string{"status": dependencyState})
+			return
+		}
 	}
 	writeJSON(response, http.StatusOK, map[string]string{"status": "ready"})
 }
