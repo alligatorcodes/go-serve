@@ -124,7 +124,17 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			healthy[index].Store(true)
 			breakers[index] = &circuitBreaker{threshold: threshold, cooldown: cooldown}
 		}
-		rawTransport := &http.Transport{
+		transport := &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   32,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+		healthTransport := &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
@@ -142,10 +152,10 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			retryAttempts:   retryAttempts,
 			healthy:         healthy,
 			breakers:        breakers,
-			healthTransport: rawTransport,
-			transport:       rawTransport,
+			healthTransport: healthTransport,
+			transport:       transport,
 		}
-		pool.transport = &retryTransport{base: rawTransport, attempts: retryAttempts, breakers: breakers}
+		pool.transport = &retryTransport{base: transport, attempts: retryAttempts, breakers: breakers}
 		pool.proxy = newProxy(pool)
 		upstreams[upstream.Name] = pool
 	}
@@ -290,12 +300,14 @@ func match(routes []compiledRoute, request *http.Request) (*compiledRoute, bool)
 func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
-			target, index := u.pick()
+			target, index, permitted := u.pick()
 			request.URL.Scheme = target.Scheme
 			request.URL.Host = target.Host
 			request.Host = target.Host
 			joinProxyPath(target, request.URL)
-			*request = *request.WithContext(context.WithValue(request.Context(), endpointIndexKey{}, index))
+			requestContext := context.WithValue(request.Context(), endpointIndexKey{}, index)
+			requestContext = context.WithValue(requestContext, endpointPermitKey{}, permitted)
+			*request = *request.WithContext(requestContext)
 		},
 		Transport: u.transport,
 		ErrorHandler: func(response http.ResponseWriter, _ *http.Request, err error) {
@@ -305,14 +317,14 @@ func newProxy(u *upstreamPool) *httputil.ReverseProxy {
 	}
 }
 
-func (u *upstreamPool) pick() (*url.URL, int) {
+func (u *upstreamPool) pick() (*url.URL, int, bool) {
 	for index := uint64(0); index < uint64(len(u.endpoints)); index++ {
 		candidate := (u.next.Add(1) + index) % uint64(len(u.endpoints))
 		if u.healthy[candidate].Load() && u.breakers[candidate].allow() {
-			return u.endpoints[candidate], int(candidate)
+			return u.endpoints[candidate], int(candidate), true
 		}
 	}
-	return u.endpoints[0], 0
+	return u.endpoints[0], 0, false
 }
 
 type retryTransport struct {
@@ -322,10 +334,12 @@ type retryTransport struct {
 }
 
 type endpointIndexKey struct{}
+type endpointPermitKey struct{}
 
 func (transport *retryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	index, ok := request.Context().Value(endpointIndexKey{}).(int)
-	if !ok || index < 0 || index >= len(transport.breakers) || !transport.breakers[index].allow() {
+	permitted, hasPermit := request.Context().Value(endpointPermitKey{}).(bool)
+	if !ok || index < 0 || index >= len(transport.breakers) || (!hasPermit || !permitted) && !transport.breakers[index].allow() {
 		return nil, errors.New("upstream circuit is open")
 	}
 	safe := request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.Method == http.MethodPut || request.Method == http.MethodDelete
@@ -428,7 +442,11 @@ func (u *upstreamPool) checkHealth(parent context.Context) {
 		if err == nil {
 			response, requestErr := client.Do(request)
 			if requestErr == nil {
-				u.healthy[index].Store(response.StatusCode >= 200 && response.StatusCode < 400)
+				healthy := response.StatusCode >= 200 && response.StatusCode < 400
+				u.healthy[index].Store(healthy)
+				if healthy {
+					u.breakers[index].success()
+				}
 				response.Body.Close()
 			} else {
 				u.healthy[index].Store(false)

@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Isolated upstream health-check transports from request transports and fixed half-open endpoint probes so successful health recovery closes only that endpoint's circuit.
 - Made readiness stateful: shutdown marks `/ready` as `503` with a draining status before listener shutdown and request draining.
 - Implemented route request-header set semantics with trusted-header stripping and escaped URL path preservation for repeated slashes, trailing slashes, encoded separators, and dot segments.
 - Isolated active health checks from request retries/circuit breakers and moved circuit state to individual endpoints with guarded half-open recovery.

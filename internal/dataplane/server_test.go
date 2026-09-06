@@ -265,6 +265,57 @@ func TestCircuitBreakerAllowsOnlyOneHalfOpenProbe(t *testing.T) {
 	}
 }
 
+func TestHalfOpenEndpointCanRecoverThroughProxy(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			response.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}, CircuitBreakerThreshold: 1, CircuitBreakerCooldown: time.Millisecond}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	if response := serve(server, http.MethodGet, "api.example.com", "/", ""); response.Code != http.StatusBadGateway {
+		t.Fatalf("initial failure status = %d", response.Code)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if response := serve(server, http.MethodGet, "api.example.com", "/", ""); response.Code != http.StatusNoContent {
+		t.Fatalf("half-open recovery status = %d", response.Code)
+	}
+}
+
+func TestHealthChecksUseIndependentTransport(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}, HealthPath: "/health"}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	pool := server.runtime.Load().routes[0].upstream
+	requestTransport := pool.transport.(*retryTransport).base
+	if pool.healthTransport == requestTransport {
+		t.Fatal("health and request transports must be independent")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
