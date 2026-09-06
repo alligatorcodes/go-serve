@@ -15,10 +15,18 @@ import (
 	"time"
 
 	"github.com/alligatorcodes/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/observability"
 )
 
 type Server struct {
 	runtime atomic.Pointer[runtimeState]
+	events  EventSink
+}
+
+type EventSink interface {
+	RecordHealthFailure()
+	RecordCircuitTransition()
+	RecordActivation()
 }
 
 type runtimeState struct {
@@ -35,6 +43,7 @@ type Authorizer interface {
 }
 
 type compiledRoute struct {
+	name        string
 	host        string
 	pathPrefix  string
 	methods     map[string]struct{}
@@ -45,6 +54,7 @@ type compiledRoute struct {
 }
 
 type upstreamPool struct {
+	name            string
 	endpoints       []*url.URL
 	next            atomic.Uint64
 	requestTimeout  time.Duration
@@ -56,11 +66,17 @@ type upstreamPool struct {
 	proxy           *httputil.ReverseProxy
 	healthy         []atomic.Bool
 	breakers        []*circuitBreaker
+	events          EventSink
 }
 
 func NewServer(cfg config.Config, authorizers ...Authorizer) (*Server, error) {
+	return NewServerWithEvents(cfg, firstAuthorizer(authorizers), nil)
+}
+
+func NewServerWithEvents(cfg config.Config, authorizer Authorizer, events EventSink) (*Server, error) {
 	server := &Server{}
-	if err := server.ReconfigureWithAuthorizer(cfg, firstAuthorizer(authorizers)); err != nil {
+	server.events = events
+	if err := server.ReconfigureWithAuthorizer(cfg, authorizer); err != nil {
 		return nil, err
 	}
 	return server, nil
@@ -145,6 +161,7 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			ExpectContinueTimeout: 1 * time.Second,
 		}
 		pool := &upstreamPool{
+			name:            upstream.Name,
 			endpoints:       endpoints,
 			requestTimeout:  requestTimeout,
 			healthPath:      upstream.HealthPath,
@@ -152,10 +169,11 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			retryAttempts:   retryAttempts,
 			healthy:         healthy,
 			breakers:        breakers,
+			events:          s.events,
 			healthTransport: healthTransport,
 			transport:       transport,
 		}
-		pool.transport = &retryTransport{base: transport, attempts: retryAttempts, breakers: breakers}
+		pool.transport = &retryTransport{base: transport, attempts: retryAttempts, breakers: breakers, events: s.events}
 		pool.proxy = newProxy(pool)
 		upstreams[upstream.Name] = pool
 	}
@@ -175,6 +193,7 @@ func (s *Server) ReconfigureWithAuthorizer(cfg config.Config, authorizer Authori
 			methods[strings.ToUpper(method)] = struct{}{}
 		}
 		routes = append(routes, compiledRoute{
+			name:        route.Name,
 			host:        normalizeHost(route.Host),
 			pathPrefix:  prefix,
 			methods:     methods,
@@ -217,6 +236,7 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		runtime := s.runtime.Load()
 		if runtime == nil {
+			observability.AddRejection(request)
 			http.Error(response, "data plane is unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -224,6 +244,7 @@ func (s *Server) Handler() http.Handler {
 		case runtime.maxInFlight <- struct{}{}:
 			defer func() { <-runtime.maxInFlight }()
 		default:
+			observability.AddRejection(request)
 			http.Error(response, "server is busy", http.StatusServiceUnavailable)
 			return
 		}
@@ -231,6 +252,7 @@ func (s *Server) Handler() http.Handler {
 		stripTrustedHeaders(request)
 		route, methodAllowed := match(runtime.routes, request)
 		if route == nil {
+			observability.AddRejection(request)
 			if methodAllowed {
 				response.Header().Set("Allow", "GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS")
 				http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
@@ -239,8 +261,10 @@ func (s *Server) Handler() http.Handler {
 			http.NotFound(response, request)
 			return
 		}
+		observability.SetRoute(request, route.name, route.upstream.name)
 		if route.requireAuth {
 			if runtime.authorizer == nil || !runtime.authorizer.Authorize(response, request, route.scopes) {
+				observability.AddRejection(request)
 				if runtime.authorizer == nil {
 					http.Error(response, "authentication is not configured", http.StatusServiceUnavailable)
 				}
@@ -248,6 +272,7 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		if !route.upstream.hasHealthyEndpoint() {
+			observability.AddRejection(request)
 			http.Error(response, "upstream unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -331,6 +356,7 @@ type retryTransport struct {
 	base     http.RoundTripper
 	attempts int
 	breakers []*circuitBreaker
+	events   EventSink
 }
 
 type endpointIndexKey struct{}
@@ -350,9 +376,13 @@ func (transport *retryTransport) RoundTrip(request *http.Request) (*http.Respons
 			return response, nil
 		}
 		transport.breakers[index].failure()
+		if transport.events != nil && transport.breakers[index].isOpen() {
+			transport.events.RecordCircuitTransition()
+		}
 		if attempt >= transport.attempts || !safe {
 			return response, err
 		}
+		observability.AddRetry(request)
 		if response != nil {
 			response.Body.Close()
 		}
@@ -409,6 +439,12 @@ func (breaker *circuitBreaker) failure() {
 	}
 }
 
+func (breaker *circuitBreaker) isOpen() bool {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	return !breaker.openUntil.IsZero()
+}
+
 func (u *upstreamPool) hasHealthyEndpoint() bool {
 	for index := range u.healthy {
 		if u.healthy[index].Load() {
@@ -444,14 +480,23 @@ func (u *upstreamPool) checkHealth(parent context.Context) {
 			if requestErr == nil {
 				healthy := response.StatusCode >= 200 && response.StatusCode < 400
 				u.healthy[index].Store(healthy)
+				if !healthy && u.events != nil {
+					u.events.RecordHealthFailure()
+				}
 				if healthy {
 					u.breakers[index].success()
 				}
 				response.Body.Close()
 			} else {
+				if u.events != nil {
+					u.events.RecordHealthFailure()
+				}
 				u.healthy[index].Store(false)
 			}
 		} else {
+			if u.events != nil {
+				u.events.RecordHealthFailure()
+			}
 			u.healthy[index].Store(false)
 		}
 		cancel()

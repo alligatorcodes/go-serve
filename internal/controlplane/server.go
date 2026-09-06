@@ -24,6 +24,7 @@ type Server struct {
 	activate   func(config.Config) error
 	readyState bool
 	readiness  func() (bool, string)
+	metrics    interface{ SetConfigVersion(int64) }
 }
 
 func NewServer(cfg config.Config, activators ...func(config.Config) error) *Server {
@@ -44,6 +45,12 @@ func (s *Server) SetDraining() {
 func (s *Server) SetReadinessCheck(check func() (bool, string)) {
 	s.mu.Lock()
 	s.readiness = check
+	s.mu.Unlock()
+}
+
+func (s *Server) SetMetrics(metrics interface{ SetConfigVersion(int64) }) {
+	s.mu.Lock()
+	s.metrics = metrics
 	s.mu.Unlock()
 }
 
@@ -195,6 +202,9 @@ func (s *Server) replaceConfig(response http.ResponseWriter, request *http.Reque
 	s.previous = previous
 	s.config = config.NewSnapshot(candidate)
 	s.version++
+	if s.metrics != nil {
+		s.metrics.SetConfigVersion(s.version)
+	}
 	s.state = "active"
 	s.lastErr = ""
 	s.mu.Unlock()
@@ -230,6 +240,9 @@ func (s *Server) rollbackConfig(response http.ResponseWriter, request *http.Requ
 	s.config = s.previous
 	s.previous = current
 	s.version++
+	if s.metrics != nil {
+		s.metrics.SetConfigVersion(s.version)
+	}
 	s.state = "active"
 	s.lastErr = ""
 	s.mu.Unlock()

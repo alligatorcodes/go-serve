@@ -11,7 +11,7 @@
 
 Scrape `GET /metrics` from the control-plane listener after authenticating. The initial metrics include total requests, responses, server errors, and active requests. Request logs include method, path, status, duration, and the supplied request ID; credentials, cookies, and authorization headers are not logged.
 
-Use `/health` for process liveness and `/ready` for traffic readiness. `/ready` returns `503` with a machine-readable dependency state when the configured cluster has no leader or is unavailable. On shutdown, the server marks `/ready` as `503` with `{"status":"draining"}`, waits briefly for load balancers to observe it, then stops accepting connections and drains for up to `server.shutdown_timeout`.
+Use `/health` for process liveness and `/ready` for traffic readiness. `/ready` returns `503` with a machine-readable dependency state when the configured cluster has no leader or is unavailable. `/metrics` includes bounded route/upstream/method/status request series plus retry, auth, rejection, health, circuit, and activation counters. On shutdown, the server marks `/ready` as `503` with `{"status":"draining"}`, waits briefly for load balancers to observe it, then stops accepting connections and drains for up to `server.shutdown_timeout`.
 
 ## Security checklist
 

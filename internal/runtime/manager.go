@@ -15,14 +15,19 @@ type Manager struct {
 	mu        sync.RWMutex
 	config    config.Config
 	dataPlane *dataplane.Server
+	events    dataplane.EventSink
 }
 
 func New(cfg config.Config, authorizer dataplane.Authorizer) (*Manager, error) {
-	dataPlane, err := dataplane.NewServer(cfg, authorizer)
+	return NewWithEvents(cfg, authorizer, nil)
+}
+
+func NewWithEvents(cfg config.Config, authorizer dataplane.Authorizer, events dataplane.EventSink) (*Manager, error) {
+	dataPlane, err := dataplane.NewServerWithEvents(cfg, authorizer, events)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{config: cfg.Clone(), dataPlane: dataPlane}, nil
+	return &Manager{config: cfg.Clone(), dataPlane: dataPlane, events: events}, nil
 }
 
 func (manager *Manager) DataPlane() *dataplane.Server {
@@ -44,7 +49,13 @@ func (manager *Manager) Activate(candidate config.Config) error {
 		return fmt.Errorf("server listeners, authentication, and cluster settings require restart")
 	}
 	if err := manager.dataPlane.Reconfigure(candidate); err != nil {
+		if manager.events != nil {
+			manager.events.RecordActivation()
+		}
 		return err
+	}
+	if manager.events != nil {
+		manager.events.RecordActivation()
 	}
 	manager.config = candidate.Clone()
 	return nil

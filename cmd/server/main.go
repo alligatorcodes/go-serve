@@ -49,7 +49,11 @@ func main() {
 		}
 		authorizer = authentication
 	}
-	runtimeManager, err := runtimemanager.New(cfg, authorizer)
+	metrics := observability.New()
+	if cfg.Cluster.Enabled {
+		metrics.SetNodeIdentity(cfg.Cluster.NodeID)
+	}
+	runtimeManager, err := runtimemanager.NewWithEvents(cfg, authorizer, metrics)
 	if err != nil {
 		slog.Error("invalid runtime configuration", "error", err)
 		os.Exit(1)
@@ -65,6 +69,7 @@ func main() {
 	}
 
 	controlPlane := controlplane.NewServer(cfg, runtimeManager.Activate)
+	controlPlane.SetMetrics(metrics)
 	if clusterNode != nil {
 		controlPlane.SetReadinessCheck(clusterNode.Ready)
 	}
@@ -72,7 +77,6 @@ func main() {
 	if clusterNode != nil {
 		controlHandler = clusterNode.Handler(controlHandler)
 	}
-	metrics := observability.New()
 	controlHandler = metrics.Endpoint(metrics.Middleware(controlHandler))
 	if authentication != nil {
 		controlHandler = authentication.Protect(controlHandler)

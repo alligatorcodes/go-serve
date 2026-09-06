@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/alligatorcodes/go-serve/internal/config"
+	"github.com/alligatorcodes/go-serve/internal/observability"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
@@ -146,6 +147,7 @@ func (m *Middleware) Protect(next http.Handler) http.Handler {
 func (m *Middleware) Authorize(response http.ResponseWriter, request *http.Request, requiredScopes []string) bool {
 	identity, ok := m.authenticate(request)
 	if !ok {
+		observability.SetAuthOutcome(request, "failure")
 		if m.mode == "oidc" && request.Method == http.MethodGet && acceptsHTML(request) {
 			m.redirectToLogin(response, request)
 		} else {
@@ -154,10 +156,12 @@ func (m *Middleware) Authorize(response http.ResponseWriter, request *http.Reque
 		return false
 	}
 	if !hasScopes(identity.Scopes, requiredScopes) {
+		observability.SetAuthOutcome(request, "forbidden")
 		http.Error(response, "insufficient scope", http.StatusForbidden)
 		return false
 	}
 	stripIdentityHeaders(request)
+	observability.SetAuthOutcome(request, "success")
 	request.Header.Set("X-Authenticated-Subject", identity.Subject)
 	if identity.Email != "" {
 		request.Header.Set("X-Authenticated-Email", identity.Email)

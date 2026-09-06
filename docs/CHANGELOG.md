@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added bounded route/upstream/method/status metrics, request-scoped retry/auth/rejection signals, health and circuit counters, activation counters, and config/node fields to request logs, completing feedback priority 7.
 - Made readiness dependency-aware for clustered deployments: Raft nodes report unavailable or leaderless states, while shutdown continues to publish `draining` before request draining.
 - Added real-connection regression coverage for streamed proxy responses and WebSocket-style connection upgrades, completing feedback priority 5.
 - Marked feedback priorities 1 through 3 as implemented in the project plan: runtime activation, repository identity, and OIDC correctness.
