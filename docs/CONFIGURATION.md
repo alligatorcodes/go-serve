@@ -2,6 +2,8 @@
 
 The canonical configuration format is TOML. The example configuration is in [`config/example.toml`](../config/example.toml), and the typed Go representation is in [`internal/config/config.go`](../internal/config/config.go).
 
+The default example is a single server. A local three-node cluster is defined by [`config/example-cluster-node-1.toml`](../config/example-cluster-node-1.toml), [`config/example-cluster-node-2.toml`](../config/example-cluster-node-2.toml), and [`config/example-cluster-node-3.toml`](../config/example-cluster-node-3.toml); run it with `make run-cluster`.
+
 ## Loading and activation
 
 The server starts from built-in defaults, then loads and validates the TOML configuration file supplied with `-config`. Unknown keys are rejected. A parse or validation failure stops startup before any listener is opened.
@@ -29,6 +31,8 @@ Control-plane replacement and rollback activate the data-plane runtime before pu
 | `limits` | Connection, concurrency, header, and body limits. |
 | `routes` | Host/path/method matching and per-route auth policy. |
 | `upstreams` | Named backend pools and health-check/request settings. |
+
+For clustered configurations, each `cluster.peers` entry may also specify `admin_url`. Non-bootstrap nodes use that private admin URL to request membership from an existing leader.
 
 ## Important rules
 

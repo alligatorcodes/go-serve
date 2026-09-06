@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,6 +92,9 @@ func New(ctx context.Context, cfg config.ClusterConfig) (*Node, error) {
 		}
 	}
 	go node.leadershipLoop(workerContext)
+	if !cfg.Bootstrap {
+		go node.joinLoop(workerContext)
+	}
 	return node, nil
 }
 
@@ -120,6 +125,39 @@ func (n *Node) Ready() (bool, string) {
 func (n *Node) Join(ctx context.Context, peer config.ClusterPeer) error {
 	future := n.raft.AddVoter(raft.ServerID(peer.ID), raft.ServerAddress(peer.Address), 0, 10*time.Second)
 	return future.Error()
+}
+
+func (n *Node) joinLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		for _, peer := range n.config.Peers {
+			if peer.AdminURL == "" {
+				continue
+			}
+			payload, err := json.Marshal(map[string]string{"id": n.config.NodeID, "address": n.config.AdvertiseAddr})
+			if err != nil {
+				continue
+			}
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(peer.AdminURL, "/")+"/cluster/join", bytes.NewReader(payload))
+			if err != nil {
+				continue
+			}
+			request.Header.Set("Content-Type", "application/json")
+			response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+			if err == nil {
+				response.Body.Close()
+				if response.StatusCode >= 200 && response.StatusCode < 300 {
+					return
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (n *Node) Assign(ctx context.Context, assignment Assignment) error {
@@ -226,6 +264,26 @@ func (n *Node) clusterHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/cluster/health" {
 			writeJSON(w, http.StatusOK, map[string]any{"node_id": n.config.NodeID, "leader": n.IsLeader(), "leader_address": n.LeaderAddress()})
+			return
+		}
+		if r.URL.Path == "/cluster/join" && r.Method == http.MethodPost {
+			var request struct {
+				ID      string `json:"id"`
+				Address string `json:"address"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.ID == "" || request.Address == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and address are required"})
+				return
+			}
+			if !n.IsLeader() {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cluster node is not leader"})
+				return
+			}
+			if err := n.raft.AddVoter(raft.ServerID(request.ID), raft.ServerAddress(request.Address), 0, 10*time.Second).Error(); err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "joined"})
 			return
 		}
 		if r.URL.Path == "/cluster/assignment" {

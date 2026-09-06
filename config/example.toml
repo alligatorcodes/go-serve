@@ -12,25 +12,6 @@ shutdown_timeout = "15s"
 # tls_cert_file = "/etc/go-serve/tls/tls.crt"
 # tls_key_file = "/etc/go-serve/tls/tls.key"
 
-[cluster]
-# Clustering requires persistent storage and network reachability between nodes.
-# enabled = false
-# node_id = "node-1"
-# bind_addr = "127.0.0.1:7000"
-# advertise_addr = "10.0.0.11:7000"
-# data_dir = "/var/lib/go-serve/cluster"
-# bootstrap = true
-# virtual_ip = "10.0.0.100/24"
-# interface = "eth0"
-# on_leader_command = "/usr/local/bin/go-serve-vip leader $GO_SERVE_VIP $GO_SERVE_INTERFACE"
-# on_follower_command = "/usr/local/bin/go-serve-vip follower $GO_SERVE_VIP $GO_SERVE_INTERFACE"
-# forward_timeout = "5s"
-# assignment_ttl = "10m"
-# [[cluster.peers]]
-# id = "node-2"
-# address = "10.0.0.12:7000"
-# public_url = "http://10.0.0.12:8080"
-
 [control_plane]
 # The API remains available when this is false. This only controls Swagger UI.
 ui = true

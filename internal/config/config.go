@@ -40,6 +40,7 @@ type ClusterPeer struct {
 	ID        string `toml:"id" json:"id"`
 	Address   string `toml:"address" json:"address"`
 	PublicURL string `toml:"public_url" json:"public_url"`
+	AdminURL  string `toml:"admin_url" json:"admin_url"`
 }
 
 type ServerConfig struct {

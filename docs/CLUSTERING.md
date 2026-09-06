@@ -20,6 +20,8 @@ Do not run a production cluster with one voting node if availability matters. A 
 
 Set `bootstrap = true` only for the initial cluster bootstrap. The initial node plus the configured peers form the first Raft configuration. Subsequent nodes should join through a controlled operator workflow using the cluster join API or an equivalent administrative tool; do not bootstrap a second independent cluster.
 
+For local development, `make run-cluster` starts the three configs under `config/example-cluster-node-*.toml` as separate processes. Node 1 bootstraps on Raft port `7001`; nodes 2 and 3 use their configured `admin_url` peer to request membership and listen on Raft ports `7002` and `7003`. Public ports are `8081`-`8083`, and admin ports are `9911`-`9913`. Stop the target before deleting the generated `data/example-cluster-node-*` directories to reset the cluster identity.
+
 Keep `data_dir` on durable storage and back it up according to the recovery policy. Never share one data directory between nodes.
 
 ## Virtual IP ownership
