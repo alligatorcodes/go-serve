@@ -22,6 +22,8 @@ Set `bootstrap = true` only for the initial cluster bootstrap. The initial node 
 
 For local development, `make run-cluster` starts the three configs under `config/example-cluster-node-*.toml` as separate processes. Node 1 bootstraps on Raft port `7001`; nodes 2 and 3 use their configured `admin_url` peer to request membership and listen on Raft ports `7002` and `7003`. Public ports are `8081`-`8083`, and admin ports are `9911`-`9913`. Stop the target before deleting the generated `data/example-cluster-node-*` directories to reset the cluster identity.
 
+The authenticated control plane exposes `GET /api/v1/cluster/status`, `GET /api/v1/cluster/members`, `GET /api/v1/cluster/sync`, `POST /api/v1/cluster/members`, `DELETE /api/v1/cluster/members/{id}`, and `POST /api/v1/cluster/leadership/transfer`. Membership changes and leadership transfer must be issued to the current leader; the API reports a conflict when the local node cannot perform the operation.
+
 Keep `data_dir` on durable storage and back it up according to the recovery policy. Never share one data directory between nodes.
 
 ## Virtual IP ownership

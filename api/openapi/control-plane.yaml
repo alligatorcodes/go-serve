@@ -125,6 +125,82 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RouteStatus'
+  /api/v1/cluster/status:
+    get:
+      operationId: getClusterStatus
+      responses:
+        '200':
+          description: Current Raft node and leader status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterStatus'
+        '404':
+          description: Clustering is disabled.
+  /api/v1/cluster/members:
+    get:
+      operationId: listClusterMembers
+      responses:
+        '200':
+          description: Current Raft membership.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClusterMember'
+    post:
+      operationId: addClusterMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterMemberRequest'
+      responses:
+        '200':
+          description: Member added or updated.
+        '409':
+          description: Membership change failed.
+  /api/v1/cluster/members/{id}:
+    delete:
+      operationId: removeClusterMember
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Member removed.
+        '409':
+          description: Membership change failed.
+  /api/v1/cluster/sync:
+    get:
+      operationId: getClusterSync
+      responses:
+        '200':
+          description: Local Raft log and state-machine synchronization status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterSync'
+  /api/v1/cluster/leadership/transfer:
+    post:
+      operationId: transferClusterLeadership
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: string}
+      responses:
+        '202':
+          description: Leadership transfer started.
+        '409':
+          description: Leadership transfer failed.
   /api/openapi.json:
     get:
       operationId: openapiDocument
@@ -268,3 +344,35 @@ components:
         upstream: {type: string}
         healthy_endpoints: {type: integer}
         requests_total: {type: integer, format: int64}
+    ClusterStatus:
+      type: object
+      properties:
+        node_id: {type: string}
+        state: {type: string}
+        leader: {type: boolean}
+        leader_address: {type: string}
+        stats: {type: object, additionalProperties: {type: string}}
+    ClusterMember:
+      type: object
+      properties:
+        id: {type: string}
+        address: {type: string}
+        suffrage: {type: string}
+        is_self: {type: boolean}
+        is_leader: {type: boolean}
+    ClusterMemberRequest:
+      type: object
+      required: [id, address]
+      properties:
+        id: {type: string}
+        address: {type: string}
+    ClusterSync:
+      type: object
+      properties:
+        node_id: {type: string}
+        leader_address: {type: string}
+        state: {type: string}
+        commit_index: {type: string}
+        applied_index: {type: string}
+        last_log_index: {type: string}
+        in_sync: {type: boolean}

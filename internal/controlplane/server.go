@@ -25,6 +25,16 @@ type Server struct {
 	readyState bool
 	readiness  func() (bool, string)
 	metrics    interface{ SetConfigVersion(int64) }
+	cluster    ClusterController
+}
+
+type ClusterController interface {
+	ClusterStatus() (map[string]any, error)
+	ClusterMembers() ([]map[string]any, error)
+	ClusterSync() (map[string]any, error)
+	AddClusterMember(string, string) error
+	RemoveClusterMember(string) error
+	TransferLeadership(string) error
 }
 
 func NewServer(cfg config.Config, activators ...func(config.Config) error) *Server {
@@ -54,6 +64,12 @@ func (s *Server) SetMetrics(metrics interface{ SetConfigVersion(int64) }) {
 	s.mu.Unlock()
 }
 
+func (s *Server) SetCluster(cluster ClusterController) {
+	s.mu.Lock()
+	s.cluster = cluster
+	s.mu.Unlock()
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
@@ -65,6 +81,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/config/status", s.configStatus)
 	mux.HandleFunc("GET /api/v1/servers", s.servers)
 	mux.HandleFunc("GET /api/v1/routes", s.routes)
+	mux.HandleFunc("GET /api/v1/cluster/status", s.clusterStatus)
+	mux.HandleFunc("GET /api/v1/cluster/members", s.clusterMembers)
+	mux.HandleFunc("POST /api/v1/cluster/members", s.addClusterMember)
+	mux.HandleFunc("DELETE /api/v1/cluster/members/{id}", s.removeClusterMember)
+	mux.HandleFunc("GET /api/v1/cluster/sync", s.clusterSync)
+	mux.HandleFunc("POST /api/v1/cluster/leadership/transfer", s.transferLeadership)
 	mux.HandleFunc("GET /api/openapi.json", s.openapi)
 	mux.HandleFunc("GET /api/docs", s.docs)
 	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
@@ -130,6 +152,111 @@ func (s *Server) routes(response http.ResponseWriter, _ *http.Request) {
 		})
 	}
 	writeJSON(response, http.StatusOK, routes)
+}
+
+func (s *Server) clusterStatus(response http.ResponseWriter, _ *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	status, err := cluster.ClusterStatus()
+	if err != nil {
+		writeError(response, http.StatusServiceUnavailable, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, status)
+}
+
+func (s *Server) clusterMembers(response http.ResponseWriter, _ *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	members, err := cluster.ClusterMembers()
+	if err != nil {
+		writeError(response, http.StatusServiceUnavailable, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, members)
+}
+
+func (s *Server) clusterSync(response http.ResponseWriter, _ *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	syncStatus, err := cluster.ClusterSync()
+	if err != nil {
+		writeError(response, http.StatusServiceUnavailable, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, syncStatus)
+}
+
+func (s *Server) addClusterMember(response http.ResponseWriter, request *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	var member struct {
+		ID      string `json:"id"`
+		Address string `json:"address"`
+	}
+	if err := decodeJSON(request, &member); err != nil || member.ID == "" || member.Address == "" {
+		writeError(response, http.StatusUnprocessableEntity, errors.New("id and address are required"))
+		return
+	}
+	if err := cluster.AddClusterMember(member.ID, member.Address); err != nil {
+		writeError(response, http.StatusConflict, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"status": "added", "id": member.ID})
+}
+
+func (s *Server) removeClusterMember(response http.ResponseWriter, request *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	id := request.PathValue("id")
+	if err := cluster.RemoveClusterMember(id); err != nil {
+		writeError(response, http.StatusConflict, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"status": "removed", "id": id})
+}
+
+func (s *Server) transferLeadership(response http.ResponseWriter, request *http.Request) {
+	cluster := s.clusterController()
+	if cluster == nil {
+		http.NotFound(response, nil)
+		return
+	}
+	var target struct {
+		ID string `json:"id"`
+	}
+	if request.ContentLength != 0 {
+		if err := decodeJSON(request, &target); err != nil {
+			writeError(response, http.StatusUnprocessableEntity, err)
+			return
+		}
+	}
+	if err := cluster.TransferLeadership(target.ID); err != nil {
+		writeError(response, http.StatusConflict, err)
+		return
+	}
+	writeJSON(response, http.StatusAccepted, map[string]string{"status": "transfer_started"})
+}
+
+func (s *Server) clusterController() ClusterController {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cluster
 }
 
 func (s *Server) openapi(response http.ResponseWriter, _ *http.Request) {
@@ -281,6 +408,10 @@ func (s *Server) writeStatus(response http.ResponseWriter) {
 }
 
 func decodeConfig(request *http.Request, target *config.Config) error {
+	return decodeJSON(request, target)
+}
+
+func decodeJSON(request *http.Request, target any) error {
 	decoder := json.NewDecoder(io.LimitReader(request.Body, 2<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

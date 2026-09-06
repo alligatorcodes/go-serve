@@ -12,6 +12,11 @@ const openAPIDocument = `{
     "/api/v1/config/status": {"get": {"operationId": "getConfigStatus"}},
     "/api/v1/servers": {"get": {"operationId": "listServers"}},
     "/api/v1/routes": {"get": {"operationId": "listRoutes"}}
+    ,"/api/v1/cluster/status": {"get": {"operationId": "getClusterStatus"}}
+    ,"/api/v1/cluster/members": {"get": {"operationId": "listClusterMembers"}, "post": {"operationId": "addClusterMember"}}
+    ,"/api/v1/cluster/members/{id}": {"delete": {"operationId": "removeClusterMember"}}
+    ,"/api/v1/cluster/sync": {"get": {"operationId": "getClusterSync"}}
+    ,"/api/v1/cluster/leadership/transfer": {"post": {"operationId": "transferClusterLeadership"}}
   }
 }`
 

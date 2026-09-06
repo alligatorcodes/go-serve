@@ -72,6 +72,7 @@ func main() {
 	controlPlane.SetMetrics(metrics)
 	if clusterNode != nil {
 		controlPlane.SetReadinessCheck(clusterNode.Ready)
+		controlPlane.SetCluster(clusterNode)
 	}
 	controlHandler := controlPlane.Handler()
 	if clusterNode != nil {

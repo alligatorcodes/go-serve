@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added authenticated control-plane cluster management for Raft status, membership, synchronization, node add/remove, and leadership transfer, with matching OpenAPI documentation.
 - Added three local cluster configs with controlled peer joining, removed clustering from the default single-server example, and added `make run-single`/`make run-cluster` targets.
 - Added bounded route/upstream/method/status metrics, request-scoped retry/auth/rejection signals, health and circuit counters, activation counters, and config/node fields to request logs, completing feedback priority 7.
 - Made readiness dependency-aware for clustered deployments: Raft nodes report unavailable or leaderless states, while shutdown continues to publish `draining` before request draining.

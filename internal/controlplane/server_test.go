@@ -168,6 +168,84 @@ func TestOpenAPIDocumentIsServed(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"openapi": "3.0.3"`) {
 		t.Fatalf("OpenAPI response = %d, body %q", response.Code, response.Body.String())
 	}
+	var document map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatalf("OpenAPI document is invalid JSON: %v", err)
+	}
+	paths := document["paths"].(map[string]any)
+	if _, ok := paths["/api/v1/cluster/status"]; !ok {
+		t.Fatal("OpenAPI document omitted cluster status endpoint")
+	}
+}
+
+func TestClusterManagementAPI(t *testing.T) {
+	server := NewServer(config.Default())
+	cluster := &fakeClusterController{}
+	server.SetCluster(cluster)
+
+	status := request(t, server.Handler(), http.MethodGet, "/api/v1/cluster/status", "", nil)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"Leader"`) {
+		t.Fatalf("cluster status = %d, body %q", status.Code, status.Body.String())
+	}
+	members := request(t, server.Handler(), http.MethodGet, "/api/v1/cluster/members", "", nil)
+	if members.Code != http.StatusOK || !strings.Contains(members.Body.String(), `"id":"node-1"`) {
+		t.Fatalf("cluster members = %d, body %q", members.Code, members.Body.String())
+	}
+	syncStatus := request(t, server.Handler(), http.MethodGet, "/api/v1/cluster/sync", "", nil)
+	if syncStatus.Code != http.StatusOK {
+		t.Fatalf("cluster sync = %d", syncStatus.Code)
+	}
+	add := requestJSON(t, server.Handler(), http.MethodPost, "/api/v1/cluster/members", map[string]string{"id": "node-2", "address": "127.0.0.1:7002"}, nil)
+	if add.Code != http.StatusOK || cluster.added != "node-2" {
+		t.Fatalf("cluster add = %d, added=%q", add.Code, cluster.added)
+	}
+	remove := request(t, server.Handler(), http.MethodDelete, "/api/v1/cluster/members/node-2", "", nil)
+	if remove.Code != http.StatusOK || cluster.removed != "node-2" {
+		t.Fatalf("cluster remove = %d, removed=%q", remove.Code, cluster.removed)
+	}
+	transfer := requestJSON(t, server.Handler(), http.MethodPost, "/api/v1/cluster/leadership/transfer", map[string]string{"id": "node-2"}, nil)
+	if transfer.Code != http.StatusAccepted || cluster.transferred != "node-2" {
+		t.Fatalf("cluster transfer = %d, transferred=%q", transfer.Code, cluster.transferred)
+	}
+}
+
+func TestClusterManagementAPIIsUnavailableWhenDisabled(t *testing.T) {
+	server := NewServer(config.Default())
+	response := request(t, server.Handler(), http.MethodGet, "/api/v1/cluster/status", "", nil)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("disabled cluster status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+type fakeClusterController struct {
+	added, removed, transferred string
+}
+
+func (cluster *fakeClusterController) ClusterStatus() (map[string]any, error) {
+	return map[string]any{"state": "Leader", "node_id": "node-1"}, nil
+}
+
+func (cluster *fakeClusterController) ClusterMembers() ([]map[string]any, error) {
+	return []map[string]any{{"id": "node-1"}}, nil
+}
+
+func (cluster *fakeClusterController) ClusterSync() (map[string]any, error) {
+	return map[string]any{"in_sync": true}, nil
+}
+
+func (cluster *fakeClusterController) AddClusterMember(id, _ string) error {
+	cluster.added = id
+	return nil
+}
+
+func (cluster *fakeClusterController) RemoveClusterMember(id string) error {
+	cluster.removed = id
+	return nil
+}
+
+func (cluster *fakeClusterController) TransferLeadership(id string) error {
+	cluster.transferred = id
+	return nil
 }
 
 func TestConcurrentStatusReads(t *testing.T) {

@@ -127,6 +127,90 @@ func (n *Node) Join(ctx context.Context, peer config.ClusterPeer) error {
 	return future.Error()
 }
 
+func (n *Node) ClusterStatus() (map[string]any, error) {
+	if n.raft == nil {
+		return nil, errors.New("cluster is unavailable")
+	}
+	stats := n.raft.Stats()
+	return map[string]any{
+		"node_id":        n.config.NodeID,
+		"state":          n.raft.State().String(),
+		"leader":         n.IsLeader(),
+		"leader_address": n.LeaderAddress(),
+		"stats":          stats,
+	}, nil
+}
+
+func (n *Node) ClusterMembers() ([]map[string]any, error) {
+	configurationFuture := n.raft.GetConfiguration()
+	if err := configurationFuture.Error(); err != nil {
+		return nil, err
+	}
+	configuration := configurationFuture.Configuration()
+	members := make([]map[string]any, 0, len(configuration.Servers))
+	for _, server := range configuration.Servers {
+		members = append(members, map[string]any{
+			"id":        string(server.ID),
+			"address":   string(server.Address),
+			"suffrage":  server.Suffrage.String(),
+			"is_self":   string(server.ID) == n.config.NodeID,
+			"is_leader": string(server.ID) == n.config.NodeID && n.IsLeader(),
+		})
+	}
+	return members, nil
+}
+
+func (n *Node) ClusterSync() (map[string]any, error) {
+	status, err := n.ClusterStatus()
+	if err != nil {
+		return nil, err
+	}
+	stats := status["stats"].(map[string]string)
+	return map[string]any{
+		"node_id":        n.config.NodeID,
+		"leader_address": n.LeaderAddress(),
+		"state":          status["state"],
+		"commit_index":   stats["commit_index"],
+		"applied_index":  stats["applied_index"],
+		"last_log_index": stats["last_log_index"],
+		"in_sync":        stats["commit_index"] == stats["applied_index"],
+	}, nil
+}
+
+func (n *Node) AddClusterMember(id, address string) error {
+	if id == "" || address == "" {
+		return errors.New("member id and address are required")
+	}
+	return n.raft.AddVoter(raft.ServerID(id), raft.ServerAddress(address), 0, 10*time.Second).Error()
+}
+
+func (n *Node) RemoveClusterMember(id string) error {
+	if id == "" {
+		return errors.New("member id is required")
+	}
+	if id == n.config.NodeID {
+		return errors.New("removing the local cluster member is not supported")
+	}
+	return n.raft.RemoveServer(raft.ServerID(id), 0, 10*time.Second).Error()
+}
+
+func (n *Node) TransferLeadership(id string) error {
+	if id == "" {
+		return n.raft.LeadershipTransfer().Error()
+	}
+	configurationFuture := n.raft.GetConfiguration()
+	if err := configurationFuture.Error(); err != nil {
+		return err
+	}
+	configuration := configurationFuture.Configuration()
+	for _, server := range configuration.Servers {
+		if string(server.ID) == id {
+			return n.raft.LeadershipTransferToServer(server.ID, server.Address).Error()
+		}
+	}
+	return fmt.Errorf("cluster member %q was not found", id)
+}
+
 func (n *Node) joinLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
