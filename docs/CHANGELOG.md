@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added real-connection regression coverage for streamed proxy responses and WebSocket-style connection upgrades, completing feedback priority 5.
 - Marked feedback priorities 1 through 3 as implemented in the project plan: runtime activation, repository identity, and OIDC correctness.
 - Isolated upstream health-check transports from request transports and fixed half-open endpoint probes so successful health recovery closes only that endpoint's circuit.
 - Made readiness stateful: shutdown marks `/ready` as `503` with a draining status before listener shutdown and request draining.

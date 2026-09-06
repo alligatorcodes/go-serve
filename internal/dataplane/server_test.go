@@ -1,10 +1,12 @@
 package dataplane
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +102,108 @@ func TestProxyPreservesEscapedAndTrailingURLPaths(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for upstream path %q", expected)
 		}
+	}
+}
+
+func TestProxyStreamsFlushedResponses(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		flusher, ok := response.(http.Flusher)
+		if !ok {
+			t.Fatal("upstream response writer does not support flushing")
+		}
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte("first\n"))
+		flusher.Flush()
+		time.Sleep(200 * time.Millisecond)
+		_, _ = response.Write([]byte("second\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	public := httptest.NewServer(server.Handler())
+	defer public.Close()
+	client := public.Client()
+	request, err := http.NewRequest(http.MethodGet, public.URL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Host = "api.example.com"
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	started := time.Now()
+	first, err := reader.ReadString('\n')
+	if err != nil || first != "first\n" {
+		t.Fatalf("first streamed chunk = %q, err=%v", first, err)
+	}
+	if time.Since(started) > 150*time.Millisecond {
+		t.Fatalf("first streamed chunk was delayed: %s", time.Since(started))
+	}
+	second, err := reader.ReadString('\n')
+	if err != nil || second != "second\n" {
+		t.Fatalf("second streamed chunk = %q, err=%v", second, err)
+	}
+}
+
+func TestProxySupportsConnectionUpgrades(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		connection, rw, err := response.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\nproxied")
+		_ = rw.Flush()
+	}))
+	defer upstream.Close()
+
+	cfg := config.Default()
+	cfg.Upstreams = []config.UpstreamConfig{{Name: "api", URLs: []string{upstream.URL}}}
+	cfg.Routes = []config.RouteConfig{{Name: "api", Host: "api.example.com", Upstream: "api"}}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	public := httptest.NewServer(server.Handler())
+	defer public.Close()
+	address := strings.TrimPrefix(public.URL, "http://")
+	connection, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_, _ = fmt.Fprintf(connection, "GET / HTTP/1.1\r\nHost: api.example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+	reader := bufio.NewReader(connection)
+	status, err := reader.ReadString('\n')
+	if err != nil || !strings.Contains(status, "101 Switching Protocols") {
+		t.Fatalf("upgrade status = %q, err=%v", status, err)
+	}
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	payload := make([]byte, len("proxied"))
+	if _, err := io.ReadFull(reader, payload); err != nil || string(payload) != "proxied" {
+		t.Fatalf("upgrade payload = %q, err=%v", payload, err)
 	}
 }
 

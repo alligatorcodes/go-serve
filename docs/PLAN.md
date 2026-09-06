@@ -266,7 +266,7 @@ Before adding more gateway features, close these review findings in order:
 2. **Repository identity (implemented):** the canonical Go module path and internal imports use `github.com/alligatorcodes/go-serve`.
 3. **OIDC correctness (implemented):** nonce generation, state binding, callback nonce validation, and secure redirect enforcement are covered by the authentication implementation and tests.
 4. **Upstream isolation (implemented):** health checks use an independent transport, breaker state is endpoint-specific, and half-open recovery is guarded and covered by regression tests.
-5. **Proxy correctness:** preserve escaped paths, repeated slashes, trailing slashes, `RawPath`, and encoded separators; add streaming, WebSocket, and `ResponseWriter` interface coverage or document unsupported protocols. Request-header set semantics are implemented with credential/trusted-header protection.
+5. **Proxy correctness (implemented):** escaped paths, repeated slashes, trailing slashes, `RawPath`, encoded separators, streamed responses, connection upgrades, and trusted request-header set semantics are covered by regression tests.
 6. **Lifecycle truthfulness:** make readiness reflect activation, dependencies, draining, and cluster health. Flip readiness before shutdown and allow load balancers to observe the change.
 7. **Operational signal:** add bounded route/upstream/method/status dimensions and counters for retries, auth failures, health failures, circuit transitions, configuration activation, and request rejection. Include route, upstream, config version, and node identity in logs.
 
